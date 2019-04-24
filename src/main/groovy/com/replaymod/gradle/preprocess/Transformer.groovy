@@ -25,10 +25,9 @@ class Transformer {
 
     Map<String, String> run(Map<String, String> sources) {
         def stdout = new ByteArrayOutputStream()
-        def stdin = new StringBufferInputStream(
-                classpath.collect { it.absolutePath + '\n' }.join()
-                + sources.collect { "${it.key}\n${it.value.count('\n') + 1}\n${it.value}\n" }.join()
-        )
+        def input = classpath.collect { it.absolutePath + '\n' }.join() +
+                sources.collect { "${it.key}\n${it.value.count('\n') + 1}\n${it.value}\n" }.join()
+        def stdin = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8))
 
         project.javaexec {
             classpath configuration
