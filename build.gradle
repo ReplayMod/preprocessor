@@ -17,7 +17,7 @@
 apply plugin: 'groovy'
 apply plugin: 'maven'
 
-group = 'com.replaymod'
+group = 'com.github.replaymod'
 version = '1.0-SNAPSHOT'
 
 sourceCompatibility = '1.8'
@@ -29,6 +29,6 @@ dependencies {
 }
 
 jar {
-    baseName 'preprocess'
+    baseName 'preprocessor'
 }
 

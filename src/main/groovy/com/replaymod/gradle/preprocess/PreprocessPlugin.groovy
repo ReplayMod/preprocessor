@@ -24,6 +24,7 @@ class PreprocessPlugin implements Plugin<Project> {
         def originalRes = '../../src/main/resources'
         def preprocessedSrc = 'build/preprocessed/src'
         def preprocessedRes = 'build/preprocessed/res'
+        def mappingFiles = findMappingFiles(project)
 
         if (project.name == 'core') {
             project.sourceSets {
@@ -31,36 +32,79 @@ class PreprocessPlugin implements Plugin<Project> {
                 main.resources.srcDirs = [originalRes]
             }
         } else {
+            def mcVersion = project.mcVersion as int
+            def core = project.parent.evaluationDependsOn('core')
+            def coreVersion = core.mcVersion as int
+            def mappingFile
+            def inherited
+            if (coreVersion < mcVersion) {
+                // Upgrading older core to newer version
+                // Grab the next mapping at or below our version
+                // e.g. if we're on 1.13.2, that'll be 11302 which maps 1.13.2 to 1.12.2
+                def entry = mappingFiles.floorEntry(mcVersion)
+                if (entry == null) {
+                    inherited = core
+                    mappingFile = null
+                } else {
+                    mappingFile = entry.value
+                    // Inherit from the version directly below the mapping we're using
+                    def inheritedVersion = mappingFiles.ceilingKey(entry.key)
+                    if (inheritedVersion == null) {
+                        inherited = core
+                    } else {
+                        inherited = projectForVersion(project, inheritedVersion)
+                    }
+                }
+            } else {
+                // Dowgrading newer core to older versions
+                // Grab the next mapping on our way to the newer core version (i.e. the one right above our version)
+                def entry = mappingFiles.higherEntry(mcVersion)
+                if (entry == null) {
+                    inherited = core
+                    mappingFile = null
+                } else {
+                    mappingFile = entry.value
+                    // Inherit from the version which the mapping belongs to
+                    // e.g. if we're on 1.12.2 then the mapping maps 1.13.2 to 1.12.2 and will be labeled 11302
+                    inherited = projectForVersion(project, entry.key)
+                }
+            }
+            
             def preprocessJava = project.tasks.create('preprocessJava', PreprocessTask) {
-                source originalSrc
+                source inherited.sourceSets.main.java.srcDirs[0]
                 generated preprocessedSrc
-                var MC: project.mcVersion
+                compileTask inherited.tasks.compileJava
+                mapping = mappingFile
+                reverseMapping = coreVersion < mcVersion
+                var MC: mcVersion
             }
 
             def preprocessResources = project.tasks.create('preprocessResources', PreprocessTask) {
                 source originalRes
                 generated preprocessedRes
-                var MC: project.mcVersion
+                var MC: mcVersion
             }
 
             project.tasks.compileJava.dependsOn preprocessJava
             project.tasks.processResources.dependsOn preprocessResources
 
             project.sourceSets {
-                main.java.srcDir preprocessedSrc
-                main.resources.srcDir preprocessedRes
+                main.java.srcDirs = [preprocessedSrc]
+                main.resources.srcDirs = [preprocessedRes]
             }
 
             def setCoreVersionJava = project.tasks.create('setCoreVersionJava', PreprocessTask) {
-                inplace originalSrc
+                dependsOn preprocessJava
+                source preprocessedSrc
+                generated originalSrc
                 var DEV_ENV: 1
-                var MC: project.mcVersion
+                var MC: mcVersion
             }
 
             def setCoreVersionResources = project.tasks.create('setCoreVersionResources', PreprocessTask) {
                 inplace originalRes
                 var DEV_ENV: 1
-                var MC: project.mcVersion
+                var MC: mcVersion
             }
 
             project.tasks.create('setCoreVersion') {
@@ -68,9 +112,28 @@ class PreprocessPlugin implements Plugin<Project> {
                 dependsOn setCoreVersionResources
 
                 doLast {
-                    project.file('../core/mcVersion').write(project.mcVersion.toString())
+                    project.file('../core/mcVersion').write(mcVersion.toString())
                 }
             }
         }
+    }
+
+    static projectForVersion(Project project, int version) {
+        def name = "${(int)(version/10000)}.${(int)(version/100)%100}" + (version%100==0 ? '' : ".${version%100}")
+        println(name)
+        project.parent.evaluationDependsOn(name)
+    }
+
+    static NavigableMap<Integer, File> findMappingFiles(Project project) {
+        def mappings = new TreeMap<Integer, File>()
+        project.file('../').listFiles().each {
+            def mappingFile = new File(it, "mapping.txt")
+            if (mappingFile.exists()) {
+                def (major, minor, patch) = it.name.tokenize('.')
+                def version = "${major}${minor.padLeft(2, '0')}${(patch ?: '').padLeft(2, '0')}" as int
+                mappings.put(version, mappingFile)
+            }
+        }
+        mappings
     }
 }

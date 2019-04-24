@@ -16,12 +16,18 @@
 package com.replaymod.gradle.preprocess
 
 import org.gradle.api.DefaultTask
+import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
+import org.gradle.api.tasks.compile.AbstractCompile
 
 import java.nio.charset.StandardCharsets
+import java.util.function.Function
 import java.util.regex.Pattern
 
 class PreprocessTask extends DefaultTask {
@@ -30,6 +36,17 @@ class PreprocessTask extends DefaultTask {
 
     @InputDirectory
     File source
+
+    @InputFile
+    @Optional
+    File mapping = null
+
+    @Input
+    boolean reverseMapping = false
+
+    @InputFiles
+    @Optional
+    FileCollection classpath = null
 
     @Input
     Map<String, Integer> vars = new HashMap<>()
@@ -58,6 +75,11 @@ class PreprocessTask extends DefaultTask {
         source = generated = project.file(file)
     }
 
+    void compileTask(AbstractCompile task) {
+        dependsOn(task)
+        classpath = task.classpath + project.files(task.destinationDir)
+    }
+
     void var(String name, int value) {
         vars.put(name, value)
     }
@@ -79,11 +101,37 @@ class PreprocessTask extends DefaultTask {
         def inPath = source.toPath()
         def outPath = generated.toPath()
         def inPlace = inPath.toAbsolutePath() == outPath.toAbsolutePath()
+        def mappedSources = null
+
+        if (mapping != null && classpath != null) {
+            def javaTransformer = new Transformer(project)
+            javaTransformer.mapping = mapping
+            javaTransformer.reverseMapping = reverseMapping
+            javaTransformer.classpath = classpath.files.toList().findAll { it.exists() }
+            def sources = new HashMap()
+            project.fileTree(source).forEach { file ->
+                if (file.name.endsWith('.java')) {
+                    def relPath = inPath.relativize(file.toPath())
+                    sources.put(relPath.toString(), new String(file.readBytes(), StandardCharsets.UTF_8))
+                }
+            }
+            mappedSources = javaTransformer.run(sources)
+        }
+
         project.fileTree(source).forEach { file ->
-            def outFile = outPath.resolve(inPath.relativize(file.toPath())).toFile()
+            def relPath = inPath.relativize(file.toPath())
+            def outFile = outPath.resolve(relPath).toFile()
             def kws = keywords.find { ext, _ -> file.name.endsWith(ext) }
             if (kws) {
-                convertFile(kws.value, vars, file, outFile)
+                String mappedSource = mappedSources?.get(relPath.toString())
+                if (mappedSource != null) {
+                    def javaTransform = { List<String> lines ->
+                        mappedSource.readLines()
+                    }
+                    convertFile(kws.value, vars, file, outFile, javaTransform)
+                } else {
+                    convertFile(kws.value, vars, file, outFile)
+                }
             } else if (!inPlace) {
                 project.copy {
                     from file
@@ -138,12 +186,14 @@ class PreprocessTask extends DefaultTask {
         }
     }
 
-    static def convertSource(Map<String, String> kws, Map<String, Integer> vars, List<String> lines, String fileName) {
+    static def convertSource(Map<String, String> kws, Map<String, Integer> vars, List<String> lines, List<String> remapped, String fileName) {
         def ifStack = []
         List<Integer> indentStack = []
         def active = true
         def n = 0
-        lines = lines.collect { line ->
+        lines = [lines, remapped].transpose().collect {
+            def originalLine = it[0] as String
+            def line = it[1] as String
             n++
             def trimmed = line.trim()
             if (trimmed.startsWith(kws.if)) {
@@ -204,7 +254,12 @@ class PreprocessTask extends DefaultTask {
                     } else if (!trimmed.startsWith(kws.eval)) {
                         def actualIndent = getIndent(line)
                         if (currIndent <= actualIndent) {
-                            line = ' ' * currIndent + kws.eval + ' ' + line.substring(currIndent)
+                            // Line has been disabled, so we want to use its non-remapped content instead.
+                            // For one, the remapped content would be useless anyway since it's commented out
+                            // and, more importantly, if we do not preserve it, we might permanently loose it as the
+                            // remap process is only guaranteed to work on code which compiles and since we're
+                            // just about to comment it out, it probably doesn't compile.
+                            line = ' ' * currIndent + kws.eval + ' ' + originalLine.substring(currIndent)
                         }
                     }
                 }
@@ -218,10 +273,16 @@ class PreprocessTask extends DefaultTask {
     }
 
     static def convertFile(Map<String, String> kws, Map<String, Integer> vars, File inFile, File outFile) {
+        convertFile(kws, vars, inFile, outFile, null)
+    }
+
+    static def convertFile(Map<String, String> kws, Map<String, Integer> vars, File inFile, File outFile,
+                           Function<List<String>, List<String>> remap) {
         def string = new String(inFile.readBytes(), StandardCharsets.UTF_8)
         def lines = string.readLines()
+        def remapped = remap?.apply(lines) ?: lines
         try {
-            lines = convertSource(kws, vars, lines, inFile.path)
+            lines = convertSource(kws, vars, lines, remapped, inFile.path)
         } catch (e) {
             if (e instanceof ParserException) {
                 throw e
