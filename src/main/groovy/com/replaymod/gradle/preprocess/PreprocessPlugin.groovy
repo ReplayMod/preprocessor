@@ -42,13 +42,13 @@ class PreprocessPlugin implements Plugin<Project> {
                 // Grab the next mapping at or below our version
                 // e.g. if we're on 1.13.2, that'll be 11302 which maps 1.13.2 to 1.12.2
                 def entry = mappingFiles.floorEntry(mcVersion)
-                if (entry == null) {
+                if (entry == null || entry.key <= coreVersion) {
                     inherited = core
                     mappingFile = null
                 } else {
                     mappingFile = entry.value
                     // Inherit from the version directly below the mapping we're using
-                    def inheritedVersion = mappingFiles.ceilingKey(entry.key)
+                    def inheritedVersion = mappingFiles.lowerKey(entry.key)
                     if (inheritedVersion == null) {
                         inherited = core
                     } else {
@@ -59,7 +59,7 @@ class PreprocessPlugin implements Plugin<Project> {
                 // Dowgrading newer core to older versions
                 // Grab the next mapping on our way to the newer core version (i.e. the one right above our version)
                 def entry = mappingFiles.higherEntry(mcVersion)
-                if (entry == null) {
+                if (entry == null || entry.key > coreVersion) {
                     inherited = core
                     mappingFile = null
                 } else {
