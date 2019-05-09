@@ -85,7 +85,8 @@ class PreprocessPlugin implements Plugin<Project> {
                 var MC: mcVersion
             }
 
-            project.tasks.compileJava.dependsOn preprocessJava
+            def sourceMainJava = project.tasks.findByName('sourceMainJava')
+            (sourceMainJava ?: project.tasks.compileJava).dependsOn preprocessJava
             project.tasks.processResources.dependsOn preprocessResources
 
             project.sourceSets {
