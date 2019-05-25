@@ -6,7 +6,7 @@ import org.gradle.api.artifacts.Configuration
 import java.nio.charset.StandardCharsets
 
 class Transformer {
-    private static final ARTIFACT = 'com.github.replaymod:remap:0da1aae'
+    private static final ARTIFACT = 'com.github.replaymod:remap:5db2235'
     private static final MAIN_CLASS = 'com.replaymod.gradle.remap.Transformer'
 
     File mapping
