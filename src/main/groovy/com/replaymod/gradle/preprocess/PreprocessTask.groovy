@@ -248,7 +248,7 @@ class PreprocessTask extends DefaultTask {
                         }
                     }
                 } else {
-                    def currIndent = indentStack.last()
+                    def currIndent = indentStack.first()
                     if (trimmed.isEmpty()) {
                         line = ' ' * currIndent + kws.eval
                     } else if (!trimmed.startsWith(kws.eval)) {
