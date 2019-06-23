@@ -15,6 +15,14 @@
  */
 package com.replaymod.gradle.preprocess
 
+import com.replaymod.gradle.remap.Transformer
+import com.replaymod.gradle.remap.legacy.LegacyMapping
+import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
+import org.cadixdev.lorenz.MappingSet
+import org.cadixdev.lorenz.io.MappingFormats
+import org.cadixdev.lorenz.model.ClassMapping
+import org.cadixdev.lorenz.model.InnerClassMapping
+import org.cadixdev.lorenz.model.TopLevelClassMapping
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.Input
@@ -36,6 +44,14 @@ class PreprocessTask extends DefaultTask {
 
     @InputDirectory
     File source
+
+    @InputFile
+    @Optional
+    File sourceMappings = null
+
+    @InputFile
+    @Optional
+    File destinationMappings = null
 
     @InputFile
     @Optional
@@ -96,6 +112,156 @@ class PreprocessTask extends DefaultTask {
         DEFAULT_KEYWORDS
     }
 
+    private static MappingSet readMappings(File file) {
+        def ext = file.name.substring(file.name.lastIndexOf('.') + 1)
+        def format = MappingFormats.REGISTRY.values().find { it.standardFileExtension.orElse(null) == ext }
+        format.read(file.toPath())
+    }
+
+    // SRG doesn't track class names, so we need to inject our manual mappings which do contain them
+    // However, our manual mappings also contain certain manual mappings in MCP names which need to be
+    // applied before transitioning to SRG names (i.e. not where class mappings need to be applied).
+    // As such, we need to split our class mappings off from the rest of the manual mappings.
+    private static MappingSet splitOffClassMappings(MappingSet from) {
+        def clsMap = MappingSet.create()
+        for (cls in from.topLevelClassMappings) {
+            def clsOnly = clsMap.getOrCreateTopLevelClassMapping(cls.obfuscatedName)
+            clsOnly.deobfuscatedName = cls.deobfuscatedName
+            cls.deobfuscatedName = cls.obfuscatedName
+            for (inner in cls.innerClassMappings) {
+                splitOffInnerClassMappings(inner, clsOnly.getOrCreateInnerClassMapping(inner.obfuscatedName))
+            }
+        }
+        return clsMap
+    }
+
+    private static void splitOffInnerClassMappings(InnerClassMapping from, InnerClassMapping to) {
+        to.deobfuscatedName = from.deobfuscatedName
+        from.deobfuscatedName = from.obfuscatedName
+        for (inner in from.innerClassMappings) {
+            splitOffInnerClassMappings(inner, to.getOrCreateInnerClassMapping(inner.obfuscatedName))
+        }
+    }
+
+    // Like a.merge(b) except that mappings in b which do not exist in a at all will nevertheless be preserved.
+    private static MappingSet merge(MappingSet a, MappingSet b) {
+        merge(a, b, MappingSet.create())
+    }
+    private static MappingSet merge(MappingSet a, MappingSet b, MappingSet into) {
+        a.topLevelClassMappings.each { aClass ->
+            def bClass = b.getTopLevelClassMapping(aClass.deobfuscatedName)
+            if (bClass.isPresent()) {
+                bClass = bClass.get()
+                def merged = into.getOrCreateTopLevelClassMapping(aClass.obfuscatedName)
+                merged.deobfuscatedName = bClass.deobfuscatedName
+                merge(aClass, bClass, merged)
+            } else {
+                aClass.copy(into)
+            }
+        }
+        b.topLevelClassMappings.each {
+            if (!a.getTopLevelClassMappings().any { c -> c.deobfuscatedName == it.obfuscatedName }) {
+                it.copy(into)
+            }
+        }
+        return into
+    }
+    private static <T extends ClassMapping<T, ?>> void merge(ClassMapping<T, ?> a, ClassMapping<T, ?> b, ClassMapping<T, ?> merged) {
+        a.fieldMappings.each {
+            def bField = b.getFieldMapping(it.deobfuscatedName)
+            if (bField.isPresent()) {
+                it.merge(bField.get(), merged)
+            } else {
+                it.copy(merged)
+            }
+        }
+        b.fieldMappings.each {
+            if (!a.fieldMappings.any { c -> c.deobfuscatedSignature == it.signature }) {
+                it.copy(merged)
+            }
+        }
+        a.methodMappings.each {
+            def bMethod = b.getMethodMapping(it.deobfuscatedSignature)
+            if (bMethod.isPresent()) {
+                it.merge(bMethod.get(), merged)
+            } else {
+                it.copy(merged)
+            }
+        }
+        b.methodMappings.each {
+            if (!a.methodMappings.any { c -> c.deobfuscatedSignature == it.signature }) {
+                it.copy(merged)
+            }
+        }
+        a.innerClassMappings.each { aClass ->
+            def bClass = b.getInnerClassMapping(aClass.deobfuscatedName)
+            if (bClass.isPresent()) {
+                bClass = bClass.get()
+                def mergedInner = merged.getOrCreateInnerClassMapping(a.obfuscatedName)
+                mergedInner.deobfuscatedName = bClass.deobfuscatedName
+                merge(aClass, bClass, mergedInner)
+            } else {
+                aClass.copy(merged)
+            }
+        }
+        b.innerClassMappings.each {
+            if (!a.innerClassMappings.any { c -> c.deobfuscatedName == it.obfuscatedName }) {
+                it.copy(merged)
+            }
+        }
+    }
+
+    // Like a.merge(b) except that mappings not in b will not be in the result (even if they're in a)
+    private static MappingSet join(MappingSet a, MappingSet b) {
+        join(a, b, MappingSet.create())
+    }
+    private static MappingSet join(MappingSet a, MappingSet b, MappingSet into) {
+        a.topLevelClassMappings.each { classA ->
+            b.getTopLevelClassMapping(classA.deobfuscatedName).ifPresent { classB ->
+                join(classA, classB, into)
+            }
+        }
+        return into
+    }
+    private static void join(TopLevelClassMapping a, TopLevelClassMapping b, MappingSet into) {
+        def merged = into.getOrCreateTopLevelClassMapping(a.obfuscatedName)
+        merged.deobfuscatedName = b.deobfuscatedName
+        a.fieldMappings.each { fieldA ->
+            b.getFieldMapping(fieldA.deobfuscatedSignature).ifPresent { fieldB ->
+                fieldA.merge(fieldB, merged)
+            }
+        }
+        a.methodMappings.each { methodA ->
+            b.getMethodMapping(methodA.deobfuscatedSignature).ifPresent { methodB ->
+                methodA.merge(methodB, merged)
+            }
+        }
+        a.innerClassMappings.each { classA ->
+            b.getInnerClassMapping(classA.deobfuscatedName).ifPresent { classB ->
+                join(classA, classB, merged)
+            }
+        }
+    }
+    private static void join(InnerClassMapping a, InnerClassMapping b, ClassMapping into) {
+        def merged = into.getOrCreateInnerClassMapping(a.obfuscatedName)
+        merged.deobfuscatedName = b.deobfuscatedName
+        a.fieldMappings.each { fieldA ->
+            b.getFieldMapping(fieldA.deobfuscatedSignature).ifPresent { fieldB ->
+                fieldA.merge(fieldB, merged)
+            }
+        }
+        a.methodMappings.each { methodA ->
+            b.getMethodMapping(methodA.deobfuscatedSignature).ifPresent { methodB ->
+                methodA.merge(methodB, merged)
+            }
+        }
+        a.innerClassMappings.each { classA ->
+            b.getInnerClassMapping(classA.deobfuscatedName).ifPresent { classB ->
+                join(classA, classB, merged)
+            }
+        }
+    }
+
     @TaskAction
     void preprocess() {
         def inPath = source.toPath()
@@ -104,9 +270,20 @@ class PreprocessTask extends DefaultTask {
         def mappedSources = null
 
         if (mapping != null && classpath != null) {
-            def javaTransformer = new Transformer(project)
-            javaTransformer.mapping = mapping
-            javaTransformer.reverseMapping = reverseMapping
+            def mappings
+            if (sourceMappings?.exists() && destinationMappings?.exists()) {
+                def legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
+                def clsMap = splitOffClassMappings(legacyMap)
+                def srcMap = readMappings(sourceMappings)
+                def dstMap = readMappings(destinationMappings)
+                // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
+                // dstMap and would otherwise be filtered by the join)
+                mappings = merge(join(merge(srcMap, clsMap), dstMap.reverse()), clsMap)
+                mappings = merge(legacyMap, mappings, MappingSet.create(new LegacyMappingSetModelFactory()))
+            } else {
+                mappings = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
+            }
+            def javaTransformer = new Transformer(mappings)
             javaTransformer.classpath = classpath.files.toList().findAll { it.exists() }
             def sources = new HashMap()
             project.fileTree(source).forEach { file ->
@@ -115,7 +292,7 @@ class PreprocessTask extends DefaultTask {
                     sources.put(relPath.toString(), new String(file.readBytes(), StandardCharsets.UTF_8))
                 }
             }
-            mappedSources = javaTransformer.run(sources)
+            mappedSources = javaTransformer.remap(sources)
         }
 
         project.fileTree(source).forEach { file ->

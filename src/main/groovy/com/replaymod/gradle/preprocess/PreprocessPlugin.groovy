@@ -17,6 +17,7 @@ package com.replaymod.gradle.preprocess
 
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.Task
 
 class PreprocessPlugin implements Plugin<Project> {
     void apply(Project project) {
@@ -69,11 +70,20 @@ class PreprocessPlugin implements Plugin<Project> {
                     inherited = projectForVersion(project, entry.key)
                 }
             }
-            
+
             def preprocessJava = project.tasks.create('preprocessJava', PreprocessTask) {
                 source inherited.sourceSets.main.java.srcDirs[0]
                 generated preprocessedSrc
                 compileTask inherited.tasks.compileJava
+                project.afterEvaluate {
+                    def projectIntermediaryMappings = getIntermediaryMappings(project)
+                    def inheritedIntermediaryMappings = getIntermediaryMappings(inherited)
+                    if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null) {
+                        sourceMappings = inheritedIntermediaryMappings.first
+                        destinationMappings = projectIntermediaryMappings.first
+                        (inheritedIntermediaryMappings.second + projectIntermediaryMappings.second).each { dependsOn it }
+                    }
+                }
                 mapping = mappingFile
                 reverseMapping = coreVersion < mcVersion
                 var MC: mcVersion
@@ -136,5 +146,17 @@ class PreprocessPlugin implements Plugin<Project> {
             }
         }
         mappings
+    }
+
+    static Tuple2<File, List<Task>> getIntermediaryMappings(Project project) {
+        def genSrgsTask = project.tasks.findByName('genSrgs') // FG2
+        def createMcpToSrgTask = project.tasks.findByName('createMcpToSrg') // FG3
+        if (genSrgsTask != null) {
+            return new Tuple2(genSrgsTask.mcpToSrg, [genSrgsTask])
+        } else if (createMcpToSrgTask != null) {
+            return new Tuple2(createMcpToSrgTask.output, [createMcpToSrgTask])
+        } else {
+            return null
+        }
     }
 }
