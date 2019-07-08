@@ -14,29 +14,37 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-apply plugin: 'groovy'
-apply plugin: 'maven'
+plugins {
+    `kotlin-dsl`
+    `maven-publish`
+    groovy
+}
 
-group = 'com.github.replaymod'
-version = '1.0-SNAPSHOT'
+group = "com.github.replaymod"
+version = "SNAPSHOT"
 
-sourceCompatibility = '1.8'
-targetCompatibility = '1.8'
-
-repositories {
-    mavenCentral()
-    maven {
-        url 'https://jitpack.io'
+gradlePlugin {
+    plugins {
+        register("preprocess") {
+            id = "com.replaymod.preprocess"
+            implementationClass = "com.replaymod.gradle.preprocess.PreprocessPlugin"
+        }
     }
 }
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven(url = "https://jitpack.io")
+}
+
 dependencies {
-    compile gradleApi()
-    compile localGroovy()
-    compile 'com.github.replaymod:remap:d2c7f45'
+    implementation(gradleApi())
+    compile(localGroovy())
+    implementation("com.github.replaymod:remap:d2c7f45")
 }
-
-jar {
-    baseName 'preprocessor'
-}
-
