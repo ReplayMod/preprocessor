@@ -3,6 +3,7 @@ package com.replaymod.gradle.preprocess
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
+import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.compile.AbstractCompile
 
@@ -12,13 +13,16 @@ import java.util.*
 
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        val coreVersionFile = project.file("../mainVersion")
         val originalSrc = "../../src/main/java"
         val originalRes = "../../src/main/resources"
         val preprocessedSrc = "build/preprocessed/src"
         val preprocessedRes = "build/preprocessed/res"
         val mappingFiles = findMappingFiles(project)
 
-        if (project.name == "core") {
+        val coreVersion = coreVersionFile.readText().toInt()
+        val mcVersion = project.extra["mcVersion"] as Int
+        if (coreVersion == mcVersion) {
             project.configure<SourceSetContainer> {
                 named("main") {
                     java.setSrcDirs(listOf(originalSrc))
@@ -26,9 +30,7 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
         } else {
-            val mcVersion = project.extra["mcVersion"] as Int
-            val core = project.parent!!.evaluationDependsOn("core")
-            val coreVersion = core.extra["mcVersion"] as Int
+            val core = project.byVersion(coreVersion)
             val mappingFile: File?
             val inherited: Project?
             if (coreVersion < mcVersion) {
@@ -95,16 +97,16 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
 
-            val setCoreVersionJava = project.tasks.create<PreprocessTask>("setCoreVersionJava") {
+            val setCoreVersionJava = project.tasks.create<Copy>("setCoreVersionJava") {
                 dependsOn(preprocessJava)
-                source = project.file(preprocessedSrc)
-                generated = project.file(originalSrc)
-                vars = mutableMapOf("MC" to mcVersion, "DEV_ENV" to 1)
+                from(project.file(preprocessedSrc))
+                into(project.file(originalSrc))
             }
 
-            val setCoreVersionResources = project.tasks.create<PreprocessTask>("setCoreVersionResources") {
-                inplace(originalRes)
-                vars = mutableMapOf("MC" to mcVersion, "DEV_ENV" to 1)
+            val setCoreVersionResources = project.tasks.create<Copy>("setCoreVersionResources") {
+                dependsOn(preprocessResources)
+                from(project.file(preprocessedRes))
+                into(project.file(originalRes))
             }
 
             project.tasks.create("setCoreVersion") {
@@ -112,7 +114,7 @@ class PreprocessPlugin : Plugin<Project> {
                 dependsOn(setCoreVersionResources)
 
                 doLast {
-                    project.file("../core/mcVersion").writeText(mcVersion.toString())
+                    coreVersionFile.writeText(mcVersion.toString())
                 }
             }
         }

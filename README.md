@@ -32,8 +32,8 @@ The `//$$` shall be aligned with the inner-most `//#if`.
 Code for the more recent MC version shall be placed in the first branch of the if-else-construct.
 Version-dependent import statements shall be placed separately from and after all other imports but before the `static` and `java.*` imports.
 
-The source code resides in `src/main` (gradle project `:core`) and is automatically passed through the
-preprocessor when any of the concrete versions are built (gradle projects `:1.8`, `:1.8.9`, etc.).
+The source code resides in `src/main` (gradle project determined by `versions/mainVersion` e.g. with `11404` it'll be `:1.14.4`) and is automatically passed through the
+preprocessor when any of the other versions are built (gradle projects `:1.8`, `:1.8.9`, etc.).
 Do **NOT** edit any of the code in `versions/$MCVERSION/build/` as it is automatically generated and will be overwritten without warning.
 
 You can pass the original source code through the preprocessor if you wish to develop/debug with another version of Minecraft:
