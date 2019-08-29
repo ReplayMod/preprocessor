@@ -14,20 +14,15 @@ import java.util.*
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val coreVersionFile = project.file("../mainVersion")
-        val originalSrc = "../../src/main/java"
-        val originalRes = "../../src/main/resources"
-        val preprocessedSrc = "build/preprocessed/src"
-        val preprocessedRes = "build/preprocessed/res"
         val mappingFiles = findMappingFiles(project)
 
+        val parent = project.parent!!
         val coreVersion = coreVersionFile.readText().toInt()
         val mcVersion = project.extra["mcVersion"] as Int
         if (coreVersion == mcVersion) {
-            project.configure<SourceSetContainer> {
-                named("main") {
-                    java.setSrcDirs(listOf(originalSrc))
-                    resources.setSrcDirs(listOf(originalRes))
-                }
+            project.the<SourceSetContainer>().configureEach {
+                java.setSrcDirs(listOf(parent.file("src/$name/java")))
+                resources.setSrcDirs(listOf(parent.file("src/$name/resources")))
             }
         } else {
             val core = project.byVersion(coreVersion)
@@ -62,56 +57,58 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
 
-            val preprocessJava = project.tasks.create<PreprocessTask>("preprocessJava") {
-                source = project.file(inherited.the<SourceSetContainer>().getByName("main").java.srcDirs.first())
-                generated = project.file(preprocessedSrc)
-                compileTask(inherited.tasks.getByName("compileJava") as AbstractCompile)
-                project.afterEvaluate {
-                    val projectIntermediaryMappings = project.intermediaryMappings
-                    val inheritedIntermediaryMappings = inherited.intermediaryMappings
-                    if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null) {
+            project.the<SourceSetContainer>().configureEach {
+                val inheritedSourceSet = inherited.the<SourceSetContainer>()[name]
+                val cName = if (name == "main") "" else name.capitalize()
+                val preprocessedJava = File(project.buildDir, "preprocessed/$name/java")
+                val preprocessedResources = File(project.buildDir, "preprocessed/$name/resources")
+
+                val preprocessJava = project.tasks.register<PreprocessTask>("preprocess${cName}Java") {
+                    source = inherited.file(inheritedSourceSet.java.srcDirs.first())
+                    generated = preprocessedJava
+                    compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
+                    mapping = mappingFile
+                    reverseMapping = coreVersion < mcVersion
+                    vars = mutableMapOf("MC" to mcVersion)
+                }
+
+                val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
+                    source = inherited.file(inheritedSourceSet.resources.srcDirs.first())
+                    generated = preprocessedResources
+                    vars = mutableMapOf("MC" to mcVersion)
+                }
+
+                val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
+                (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
+
+                project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
+
+                java.setSrcDirs(listOf(preprocessedJava))
+                resources.setSrcDirs(listOf(preprocessedResources))
+            }
+
+            project.afterEvaluate {
+                val projectIntermediaryMappings = project.intermediaryMappings
+                val inheritedIntermediaryMappings = inherited.intermediaryMappings
+                if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null) {
+                    tasks.withType<PreprocessTask>().configureEach {
                         sourceMappings = inheritedIntermediaryMappings.first
                         destinationMappings = projectIntermediaryMappings.first
                         (inheritedIntermediaryMappings.second + projectIntermediaryMappings.second).forEach { dependsOn(it) }
                     }
                 }
-                mapping = mappingFile
-                reverseMapping = coreVersion < mcVersion
-                vars = mutableMapOf("MC" to mcVersion)
             }
 
-            val preprocessResources = project.tasks.create<PreprocessTask>("preprocessResources") {
-                source = project.file(originalRes)
-                generated = project.file(preprocessedRes)
-                vars = mutableMapOf("MC" to mcVersion)
-            }
+            project.tasks.register<Copy>("setCoreVersion") {
+                from(File(project.buildDir, "preprocessed"))
+                into(File(parent.projectDir, "src"))
 
-            val sourceMainJava = project.tasks.findByName("sourceMainJava")
-            (sourceMainJava ?: project.tasks.getByName("compileJava")).dependsOn(preprocessJava)
-            project.tasks.getByName("processResources").dependsOn(preprocessResources)
+                project.the<SourceSetContainer>().all {
+                    val cName = if (name == "main") "" else name.capitalize()
 
-            project.configure<SourceSetContainer> {
-                named("main") {
-                    java.setSrcDirs(listOf(preprocessedSrc))
-                    resources.setSrcDirs(listOf(preprocessedRes))
+                    dependsOn(project.tasks.named("preprocess${cName}Java"))
+                    dependsOn(project.tasks.named("preprocess${cName}Resources"))
                 }
-            }
-
-            val setCoreVersionJava = project.tasks.create<Copy>("setCoreVersionJava") {
-                dependsOn(preprocessJava)
-                from(project.file(preprocessedSrc))
-                into(project.file(originalSrc))
-            }
-
-            val setCoreVersionResources = project.tasks.create<Copy>("setCoreVersionResources") {
-                dependsOn(preprocessResources)
-                from(project.file(preprocessedRes))
-                into(project.file(originalRes))
-            }
-
-            project.tasks.create("setCoreVersion") {
-                dependsOn(setCoreVersionJava)
-                dependsOn(setCoreVersionResources)
 
                 doLast {
                     coreVersionFile.writeText(mcVersion.toString())

@@ -51,6 +51,7 @@ open class PreprocessTask : DefaultTask() {
     var generated: File? = null
 
     @InputDirectory
+    @SkipWhenEmpty
     var source: File? = null
 
     @InputFile
