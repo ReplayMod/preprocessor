@@ -18,7 +18,8 @@ class PreprocessPlugin : Plugin<Project> {
 
         val parent = project.parent!!
         val coreVersion = coreVersionFile.readText().toInt()
-        val mcVersion = project.extra["mcVersion"] as Int
+        val mcVersion = project.getMcVersion()
+        project.extra["mcVersion"] = mcVersion
         if (coreVersion == mcVersion) {
             project.the<SourceSetContainer>().configureEach {
                 java.setSrcDirs(listOf(parent.file("src/$name/java")))
@@ -116,6 +117,10 @@ class PreprocessPlugin : Plugin<Project> {
             }
         }
     }
+}
+
+private fun Project.getMcVersion(): Int = (name.split(".") + listOf("")).let { (major, minor, patch) ->
+    "$major${minor.padStart(2, '0')}${patch.padStart(2, '0')}".toInt()
 }
 
 private fun Project.byVersion(version: Int): Project {
