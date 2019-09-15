@@ -46,5 +46,5 @@ repositories {
 dependencies {
     implementation(gradleApi())
     compile(localGroovy())
-    implementation("com.github.replaymod:remap:d2c7f45")
+    implementation("com.github.replaymod:remap:fb0e54a")
 }

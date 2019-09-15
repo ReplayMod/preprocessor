@@ -82,6 +82,7 @@ open class PreprocessTask : DefaultTask() {
     @Input
     var keywords: MutableMap<String, Keywords> = mutableMapOf(
             ".java" to DEFAULT_KEYWORDS,
+            ".kt" to DEFAULT_KEYWORDS,
             ".gradle" to DEFAULT_KEYWORDS,
             ".json" to DEFAULT_KEYWORDS,
             ".mcmeta" to DEFAULT_KEYWORDS,
@@ -300,7 +301,7 @@ open class PreprocessTask : DefaultTask() {
             }.toTypedArray()
             val sources = mutableMapOf<String, String>()
             project.fileTree(source).forEach { file ->
-                if (file.name.endsWith(".java")) {
+                if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
                     val relPath = inPath.relativize(file.toPath())
                     sources[relPath.toString()] = file.readText()
                 }

@@ -3,6 +3,7 @@ package com.replaymod.gradle.preprocess
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
+import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.compile.AbstractCompile
@@ -13,6 +14,8 @@ import java.util.*
 
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        val kotlin = project.plugins.hasPlugin("kotlin")
+
         val coreVersionFile = project.file("../mainVersion")
         val mappingFiles = findMappingFiles(project)
 
@@ -24,6 +27,12 @@ class PreprocessPlugin : Plugin<Project> {
             project.the<SourceSetContainer>().configureEach {
                 java.setSrcDirs(listOf(parent.file("src/$name/java")))
                 resources.setSrcDirs(listOf(parent.file("src/$name/resources")))
+                if (kotlin) {
+                    withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(listOf(
+                            parent.file("src/$name/kotlin"),
+                            parent.file("src/$name/java")
+                    ))
+                }
             }
         } else {
             val core = project.byVersion(coreVersion)
@@ -61,30 +70,45 @@ class PreprocessPlugin : Plugin<Project> {
             project.the<SourceSetContainer>().configureEach {
                 val inheritedSourceSet = inherited.the<SourceSetContainer>()[name]
                 val cName = if (name == "main") "" else name.capitalize()
+                val preprocessedKotlin = File(project.buildDir, "preprocessed/$name/kotlin")
                 val preprocessedJava = File(project.buildDir, "preprocessed/$name/java")
                 val preprocessedResources = File(project.buildDir, "preprocessed/$name/resources")
+
+                if (kotlin) {
+                    val preprocessKotlin = project.tasks.register<PreprocessTask>("preprocess${cName}Kotlin") {
+                        source = inherited.file(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.first())
+                        generated = preprocessedKotlin
+                        compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
+                        mapping = mappingFile
+                        reverseMapping = coreVersion < mcVersion
+                        vars = mutableMapOf("MC" to mcVersion)
+                    }
+                    val sourceKotlinTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
+                    (sourceKotlinTask ?: project.tasks["compile${cName}Kotlin"]).dependsOn(preprocessKotlin)
+                    withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(listOf(preprocessKotlin, preprocessedJava))
+                }
 
                 val preprocessJava = project.tasks.register<PreprocessTask>("preprocess${cName}Java") {
                     source = inherited.file(inheritedSourceSet.java.srcDirs.first())
                     generated = preprocessedJava
                     compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
+                    if (kotlin) {
+                        compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
+                    }
                     mapping = mappingFile
                     reverseMapping = coreVersion < mcVersion
                     vars = mutableMapOf("MC" to mcVersion)
                 }
+                val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
+                (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
+                java.setSrcDirs(listOf(preprocessedJava))
 
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
                     source = inherited.file(inheritedSourceSet.resources.srcDirs.first())
                     generated = preprocessedResources
                     vars = mutableMapOf("MC" to mcVersion)
                 }
-
-                val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
-                (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
-
                 project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
-
-                java.setSrcDirs(listOf(preprocessedJava))
                 resources.setSrcDirs(listOf(preprocessedResources))
             }
 
@@ -107,6 +131,9 @@ class PreprocessPlugin : Plugin<Project> {
                 project.the<SourceSetContainer>().all {
                     val cName = if (name == "main") "" else name.capitalize()
 
+                    if (kotlin) {
+                        dependsOn(project.tasks.named("preprocess${cName}Kotlin"))
+                    }
                     dependsOn(project.tasks.named("preprocess${cName}Java"))
                     dependsOn(project.tasks.named("preprocess${cName}Resources"))
                 }
