@@ -15,6 +15,7 @@ import org.gradle.api.tasks.compile.AbstractCompile
 import org.jetbrains.kotlin.backend.common.peek
 import org.jetbrains.kotlin.backend.common.pop
 import org.jetbrains.kotlin.backend.common.push
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.Serializable
 import java.util.regex.Pattern
@@ -45,6 +46,8 @@ open class PreprocessTask : DefaultTask() {
                 endif = "##endif",
                 eval = "#$$"
         )
+
+        private val LOGGER = LoggerFactory.getLogger(PreprocessTask::class.java)
     }
 
     @OutputDirectory
@@ -286,7 +289,15 @@ open class PreprocessTask : DefaultTask() {
                 LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
             }
             val javaTransformer = Transformer(mappings)
-            javaTransformer.classpath = classpath.files.filter { it.exists() }.map { it.absolutePath }.toTypedArray()
+            LOGGER.debug("Remap Classpath:")
+            javaTransformer.classpath = classpath.files.mapNotNull {
+                if (it.exists()) {
+                    it.absolutePath.also(LOGGER::debug)
+                } else {
+                    LOGGER.debug("$it (file does not exist)")
+                    null
+                }
+            }.toTypedArray()
             val sources = mutableMapOf<String, String>()
             project.fileTree(source).forEach { file ->
                 if (file.name.endsWith(".java")) {
