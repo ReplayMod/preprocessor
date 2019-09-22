@@ -74,20 +74,6 @@ class PreprocessPlugin : Plugin<Project> {
                 val preprocessedJava = File(project.buildDir, "preprocessed/$name/java")
                 val preprocessedResources = File(project.buildDir, "preprocessed/$name/resources")
 
-                if (kotlin) {
-                    val preprocessKotlin = project.tasks.register<PreprocessTask>("preprocess${cName}Kotlin") {
-                        source = inherited.file(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.first())
-                        generated = preprocessedKotlin
-                        compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
-                        mapping = mappingFile
-                        reverseMapping = coreVersion < mcVersion
-                        vars = mutableMapOf("MC" to mcVersion)
-                    }
-                    val sourceKotlinTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
-                    (sourceKotlinTask ?: project.tasks["compile${cName}Kotlin"]).dependsOn(preprocessKotlin)
-                    withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(listOf(preprocessKotlin, preprocessedJava))
-                }
-
                 val preprocessJava = project.tasks.register<PreprocessTask>("preprocess${cName}Java") {
                     source = inherited.file(inheritedSourceSet.java.srcDirs.first())
                     generated = preprocessedJava
@@ -102,6 +88,22 @@ class PreprocessPlugin : Plugin<Project> {
                 val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
                 java.setSrcDirs(listOf(preprocessedJava))
+
+                if (kotlin) {
+                    val preprocessKotlin = project.tasks.register<PreprocessTask>("preprocess${cName}Kotlin") {
+                        source = inherited.file(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.first())
+                        generated = preprocessedKotlin
+                        compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
+                        mapping = mappingFile
+                        reverseMapping = coreVersion < mcVersion
+                        vars = mutableMapOf("MC" to mcVersion)
+                    }
+                    val kotlinConsumerTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
+                            ?: project.tasks["compile${cName}Kotlin"]
+                    kotlinConsumerTask.dependsOn(preprocessKotlin)
+                    kotlinConsumerTask.dependsOn(preprocessJava)
+                    withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(listOf(preprocessKotlin, preprocessedJava))
+                }
 
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
                     source = inherited.file(inheritedSourceSet.resources.srcDirs.first())
