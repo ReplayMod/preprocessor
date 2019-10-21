@@ -4,10 +4,6 @@ import com.replaymod.gradle.remap.Transformer
 import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
 import org.cadixdev.lorenz.MappingSet
-import org.cadixdev.lorenz.io.MappingFormats
-import org.cadixdev.lorenz.model.ClassMapping
-import org.cadixdev.lorenz.model.InnerClassMapping
-import org.cadixdev.lorenz.model.TopLevelClassMapping
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
@@ -119,152 +115,6 @@ open class PreprocessTask : DefaultTask() {
         keywords[extension] = map
     }
 
-    private fun File.readMappings(): MappingSet {
-        val ext = name.substring(name.lastIndexOf(".") + 1)
-        val format = MappingFormats.REGISTRY.values().find { it.standardFileExtension.orElse(null) == ext }
-                ?: throw UnsupportedOperationException("Cannot find mapping format for $this")
-        return format.read(toPath())
-    }
-
-    // SRG doesn't track class names, so we need to inject our manual mappings which do contain them
-    // However, our manual mappings also contain certain manual mappings in MCP names which need to be
-    // applied before transitioning to SRG names (i.e. not where class mappings need to be applied).
-    // As such, we need to split our class mappings off from the rest of the manual mappings.
-    private fun MappingSet.splitOffClassMappings(): MappingSet {
-        val clsMap = MappingSet.create()
-        for (cls in topLevelClassMappings) {
-            val clsOnly = clsMap.getOrCreateTopLevelClassMapping(cls.obfuscatedName)
-            clsOnly.deobfuscatedName = cls.deobfuscatedName
-            cls.deobfuscatedName = cls.obfuscatedName
-            for (inner in cls.innerClassMappings) {
-                inner.splitOffInnerClassMappings(clsOnly.getOrCreateInnerClassMapping(inner.obfuscatedName))
-            }
-        }
-        return clsMap
-    }
-
-    private fun InnerClassMapping.splitOffInnerClassMappings(to: InnerClassMapping) {
-        to.deobfuscatedName = deobfuscatedName
-        deobfuscatedName = obfuscatedName
-        for (inner in innerClassMappings) {
-            inner.splitOffInnerClassMappings(to.getOrCreateInnerClassMapping(inner.obfuscatedName))
-        }
-    }
-
-    // Like a.merge(b) except that mappings in b which do not exist in a at all will nevertheless be preserved.
-    private fun MappingSet.mergeBoth(b: MappingSet, into: MappingSet = MappingSet.create()): MappingSet {
-        topLevelClassMappings.forEach { aClass ->
-            val bClass = b.getTopLevelClassMapping(aClass.deobfuscatedName).orElse(null)
-            if (bClass != null) {
-                val merged = into.getOrCreateTopLevelClassMapping(aClass.obfuscatedName)
-                merged.deobfuscatedName = bClass.deobfuscatedName
-                aClass.mergeBoth(bClass, merged)
-            } else {
-                aClass.copy(into)
-            }
-        }
-        b.topLevelClassMappings.forEach {
-            if (!topLevelClassMappings.any { c -> c.deobfuscatedName == it.obfuscatedName }) {
-                it.copy(into)
-            }
-        }
-        return into
-    }
-
-    private fun <T : ClassMapping<T, *>> ClassMapping<T, *>.mergeBoth(b: ClassMapping<T, *>, merged: ClassMapping<T, *>) {
-        fieldMappings.forEach {
-            val bField = b.getFieldMapping(it.deobfuscatedName).orElse(null)
-            if (bField != null) {
-                it.merge(bField, merged)
-            } else {
-                it.copy(merged)
-            }
-        }
-        b.fieldMappings.forEach {
-            if (!fieldMappings.any { c -> c.deobfuscatedSignature == it.signature }) {
-                it.copy(merged)
-            }
-        }
-        methodMappings.forEach {
-            val bMethod = b.getMethodMapping(it.deobfuscatedSignature).orElse(null)
-            if (bMethod != null) {
-                it.merge(bMethod, merged)
-            } else {
-                it.copy(merged)
-            }
-        }
-        b.methodMappings.forEach {
-            if (!methodMappings.any { c -> c.deobfuscatedSignature == it.signature }) {
-                it.copy(merged)
-            }
-        }
-        innerClassMappings.forEach { aClass ->
-            val bClass = b.getInnerClassMapping(aClass.deobfuscatedName).orElse(null)
-            if (bClass != null) {
-                val mergedInner = merged.getOrCreateInnerClassMapping(obfuscatedName)
-                mergedInner.deobfuscatedName = bClass.deobfuscatedName
-                aClass.merge(bClass, mergedInner)
-            } else {
-                aClass.copy(merged)
-            }
-        }
-        b.innerClassMappings.forEach {
-            if (!innerClassMappings.any { c -> c.deobfuscatedName == it.obfuscatedName }) {
-                it.copy(merged)
-            }
-        }
-    }
-
-    // Like a.merge(b) except that mappings not in b will not be in the result (even if they're in a)
-    private fun MappingSet.join(b: MappingSet, into: MappingSet = MappingSet.create()): MappingSet {
-        topLevelClassMappings.forEach { classA ->
-            b.getTopLevelClassMapping(classA.deobfuscatedName).ifPresent { classB ->
-                classA.join(classB, into)
-            }
-        }
-        return into
-    }
-
-    private fun TopLevelClassMapping.join(b: TopLevelClassMapping, into: MappingSet) {
-        val merged = into.getOrCreateTopLevelClassMapping(obfuscatedName)
-        merged.deobfuscatedName = b.deobfuscatedName
-        fieldMappings.forEach { fieldA ->
-            b.getFieldMapping(fieldA.deobfuscatedSignature).ifPresent { fieldB ->
-                fieldA.merge(fieldB, merged)
-            }
-        }
-        methodMappings.forEach { methodA ->
-            b.getMethodMapping(methodA.deobfuscatedSignature).ifPresent { methodB ->
-                methodA.merge(methodB, merged)
-            }
-        }
-        innerClassMappings.forEach { classA ->
-            b.getInnerClassMapping(classA.deobfuscatedName).ifPresent { classB ->
-                classA.join(classB, merged)
-            }
-        }
-    }
-
-    private fun InnerClassMapping.join(b: InnerClassMapping, into: ClassMapping<*, *>) {
-        val merged = into.getOrCreateInnerClassMapping(obfuscatedName)
-        merged.deobfuscatedName = b.deobfuscatedName
-        fieldMappings.forEach { fieldA ->
-            b.getFieldMapping(fieldA.deobfuscatedSignature).ifPresent { fieldB ->
-                fieldA.merge(fieldB, merged)
-            }
-        }
-        methodMappings.forEach { methodA ->
-            b.getMethodMapping(methodA.deobfuscatedSignature).ifPresent { methodB ->
-                methodA.merge(methodB, merged)
-            }
-        }
-        innerClassMappings.forEach { classA ->
-            b.getInnerClassMapping(classA.deobfuscatedName).ifPresent { classB ->
-                classA.join(classB, merged)
-            }
-        }
-    }
-
     @TaskAction
     fun preprocess() {
         val source = source!!
@@ -369,7 +219,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
     private val String.indentation: Int
         get() = takeWhile { it == ' ' }.length
 
-    private fun convertSource(kws: Keywords, lines: List<String>, remapped: List<String>, fileName: String): List<String> {
+    fun convertSource(kws: Keywords, lines: List<String>, remapped: List<String>, fileName: String): List<String> {
         val ifStack = mutableListOf<Boolean>()
         val indentStack = mutableListOf<Int>()
         var active = true
