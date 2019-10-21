@@ -23,6 +23,8 @@ class PreprocessPlugin : Plugin<Project> {
         val coreVersion = coreVersionFile.readText().toInt()
         val mcVersion = project.getMcVersion()
         project.extra["mcVersion"] = mcVersion
+        val ext = project.extensions.create("preprocess", PreprocessExtension::class, project.objects, mcVersion)
+
         if (coreVersion == mcVersion) {
             project.the<SourceSetContainer>().configureEach {
                 java.setSrcDirs(listOf(parent.file("src/$name/java")))
@@ -83,7 +85,8 @@ class PreprocessPlugin : Plugin<Project> {
                     }
                     mapping = mappingFile
                     reverseMapping = coreVersion < mcVersion
-                    vars = mutableMapOf("MC" to mcVersion)
+                    vars.convention(ext.vars)
+                    keywords.convention(ext.keywords)
                 }
                 val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
@@ -96,7 +99,8 @@ class PreprocessPlugin : Plugin<Project> {
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                         mapping = mappingFile
                         reverseMapping = coreVersion < mcVersion
-                        vars = mutableMapOf("MC" to mcVersion)
+                        vars.convention(ext.vars)
+                        keywords.convention(ext.keywords)
                     }
                     val kotlinConsumerTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
                             ?: project.tasks["compile${cName}Kotlin"]
@@ -108,7 +112,8 @@ class PreprocessPlugin : Plugin<Project> {
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
                     source = inherited.file(inheritedSourceSet.resources.srcDirs.first())
                     generated = preprocessedResources
-                    vars = mutableMapOf("MC" to mcVersion)
+                    vars.convention(ext.vars)
+                    keywords.convention(ext.keywords)
                 }
                 project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
                 resources.setSrcDirs(listOf(preprocessedResources))

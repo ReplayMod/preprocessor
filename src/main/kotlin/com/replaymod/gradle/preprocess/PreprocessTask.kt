@@ -8,6 +8,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
+import org.gradle.kotlin.dsl.mapProperty
 import org.jetbrains.kotlin.backend.common.peek
 import org.jetbrains.kotlin.backend.common.pop
 import org.jetbrains.kotlin.backend.common.push
@@ -73,17 +74,10 @@ open class PreprocessTask : DefaultTask() {
     var classpath: FileCollection? = null
 
     @Input
-    var vars: MutableMap<String, Int> = mutableMapOf()
+    val vars = project.objects.mapProperty<String, Int>()
 
     @Input
-    var keywords: MutableMap<String, Keywords> = mutableMapOf(
-            ".java" to DEFAULT_KEYWORDS,
-            ".kt" to DEFAULT_KEYWORDS,
-            ".gradle" to DEFAULT_KEYWORDS,
-            ".json" to DEFAULT_KEYWORDS,
-            ".mcmeta" to DEFAULT_KEYWORDS,
-            ".cfg" to CFG_KEYWORDS
-    )
+    val keywords = project.objects.mapProperty<String, Keywords>()
 
     fun source(file: Any) {
         source = project.file(file)
@@ -101,18 +95,6 @@ open class PreprocessTask : DefaultTask() {
     fun compileTask(task: AbstractCompile) {
         dependsOn(task)
         classpath = task.classpath + project.files(task.destinationDir)
-    }
-
-    fun `var`(name: String, value: Int) {
-        vars[name] = value
-    }
-
-    fun `var`(map: Map<String, Int>) {
-        vars.putAll(map)
-    }
-
-    fun keywords(extension: String, map: Keywords) {
-        keywords[extension] = map
     }
 
     @TaskAction
@@ -159,11 +141,11 @@ open class PreprocessTask : DefaultTask() {
             mappedSources = javaTransformer.remap(sources)
         }
 
-        val commentPreprocessor = CommentPreprocessor(vars)
+        val commentPreprocessor = CommentPreprocessor(vars.get())
         project.fileTree(source).forEach { file ->
             val relPath = inPath.relativize(file.toPath())
             val outFile = outPath.resolve(relPath).toFile()
-            val kws = keywords.entries.find { (ext, _) -> file.name.endsWith(ext) }
+            val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
             if (kws != null) {
                 val javaTransform = { lines: List<String> ->
                     mappedSources?.get(relPath.toString())?.lines() ?: lines
