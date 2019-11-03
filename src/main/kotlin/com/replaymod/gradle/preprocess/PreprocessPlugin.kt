@@ -1,5 +1,7 @@
 package com.replaymod.gradle.preprocess
 
+import net.fabricmc.mappings.MappingsProvider
+import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
@@ -10,22 +12,28 @@ import org.gradle.api.tasks.compile.AbstractCompile
 
 import org.gradle.kotlin.dsl.*
 import java.io.File
-import java.util.*
 
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
-        val kotlin = project.plugins.hasPlugin("kotlin")
+        val parent = project.parent
+        if (parent == null) {
+            project.extensions.create("preprocess", RootPreprocessExtension::class)
+            return
+        }
 
-        val coreVersionFile = project.file("../mainVersion")
-        val mappingFiles = findMappingFiles(project)
+        val rootExtension = parent.extensions.getByType<RootPreprocessExtension>()
+        val graph = rootExtension.rootNode ?: throw IllegalStateException("Preprocess graph was not configured.")
+        val projectNode = graph.findNode(project.name) ?: throw IllegalStateException("Prepocess graph does not contain ${project.name}.")
 
-        val parent = project.parent!!
-        val coreVersion = coreVersionFile.readText().toInt()
-        val mcVersion = project.getMcVersion()
+        val coreProjectFile = project.file("../mainProject")
+        val coreProject = coreProjectFile.readText().trim()
+        val mcVersion = projectNode.mcVersion
         project.extra["mcVersion"] = mcVersion
         val ext = project.extensions.create("preprocess", PreprocessExtension::class, project.objects, mcVersion)
 
-        if (coreVersion == mcVersion) {
+        val kotlin = project.plugins.hasPlugin("kotlin")
+
+        if (coreProject == project.name) {
             project.the<SourceSetContainer>().configureEach {
                 java.setSrcDirs(listOf(parent.file("src/$name/java")))
                 resources.setSrcDirs(listOf(parent.file("src/$name/resources")))
@@ -37,37 +45,10 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
         } else {
-            val core = project.byVersion(coreVersion)
-            val mappingFile: File?
-            val inherited: Project?
-            if (coreVersion < mcVersion) {
-                // Upgrading older core to newer version
-                // Grab the next mapping at or below our version
-                // e.g. if we're on 1.13.2, that'll be 11302 which maps 1.13.2 to 1.12.2
-                val entry = mappingFiles.floorEntry(mcVersion)
-                if (entry == null || entry.key <= coreVersion) {
-                    inherited = core
-                    mappingFile = null
-                } else {
-                    mappingFile = entry.value
-                    // Inherit from the version directly below the mapping we"re using
-                    val inheritedVersion = mappingFiles.lowerKey(entry.key)
-                    inherited = inheritedVersion?.let { project.byVersion(it) } ?: core
-                }
-            } else {
-                // Dowgrading newer core to older versions
-                // Grab the next mapping on our way to the newer core version (i.e. the one right above our version)
-                val entry = mappingFiles.higherEntry(mcVersion)
-                if (entry == null || entry.key > coreVersion) {
-                    inherited = core
-                    mappingFile = null
-                } else {
-                    mappingFile = entry.value
-                    // Inherit from the version which the mapping belongs to
-                    // e.g. if we're on 1.12.2 then the mapping maps 1.13.2 to 1.12.2 and will be labeled 11302
-                    inherited = project.byVersion(entry.key)
-                }
-            }
+            val inheritedLink = projectNode.links.find { it.first.findNode(coreProject) != null }
+            val reverseMappings = inheritedLink != null
+            val (inheritedNode, mappingFile) = inheritedLink ?: graph.findParent(projectNode)!!
+            val inherited = parent.evaluationDependsOn(inheritedNode.project)
 
             project.the<SourceSetContainer>().configureEach {
                 val inheritedSourceSet = inherited.the<SourceSetContainer>()[name]
@@ -84,7 +65,7 @@ class PreprocessPlugin : Plugin<Project> {
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                     }
                     mapping = mappingFile
-                    reverseMapping = coreVersion < mcVersion
+                    reverseMapping = reverseMappings
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
                 }
@@ -98,7 +79,7 @@ class PreprocessPlugin : Plugin<Project> {
                         generated = preprocessedKotlin
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                         mapping = mappingFile
-                        reverseMapping = coreVersion < mcVersion
+                        reverseMapping = reverseMappings
                         vars.convention(ext.vars)
                         keywords.convention(ext.keywords)
                     }
@@ -120,14 +101,32 @@ class PreprocessPlugin : Plugin<Project> {
             }
 
             project.afterEvaluate {
+                val prepareTaskName = "prepareMappingsForPreprocessor"
                 val projectIntermediaryMappings = project.intermediaryMappings
                 val inheritedIntermediaryMappings = inherited.intermediaryMappings
-                if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null) {
-                    tasks.withType<PreprocessTask>().configureEach {
-                        sourceMappings = inheritedIntermediaryMappings.first
-                        destinationMappings = projectIntermediaryMappings.first
-                        (inheritedIntermediaryMappings.second + projectIntermediaryMappings.second).forEach { dependsOn(it) }
+                val projectNotchMappings = project.notchMappings
+                val inheritedNotchMappings = inherited.notchMappings
+                val sourceSrg = project.buildDir.resolve(prepareTaskName).resolve("source.srg")
+                val destinationSrg = project.buildDir.resolve(prepareTaskName).resolve("destination.srg")
+                val prepareTask = if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null
+                        && inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
+                    tasks.register(prepareTaskName) {
+                        bakeNamedToIntermediaryMappings(inheritedIntermediaryMappings, sourceSrg)
+                        bakeNamedToIntermediaryMappings(projectIntermediaryMappings, destinationSrg)
                     }
+                } else if (inheritedNotchMappings != null && projectNotchMappings != null
+                        && inheritedNode.mcVersion == projectNode.mcVersion) {
+                    tasks.register(prepareTaskName) {
+                        bakeNamedToOfficialMappings(inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg)
+                        bakeNamedToOfficialMappings(projectNotchMappings, projectIntermediaryMappings, destinationSrg)
+                    }
+                } else {
+                    throw IllegalStateException("Failed to find mappings from $inherited to $project.")
+                }
+                tasks.withType<PreprocessTask>().configureEach {
+                    sourceMappings = sourceSrg
+                    destinationMappings = destinationSrg
+                    dependsOn(prepareTask)
                 }
             }
 
@@ -146,42 +145,74 @@ class PreprocessPlugin : Plugin<Project> {
                 }
 
                 doLast {
-                    coreVersionFile.writeText(mcVersion.toString())
+                    coreProjectFile.writeText(project.name)
                 }
             }
         }
     }
 }
 
-private fun Project.getMcVersion(): Int = (name.split(".") + listOf("")).let { (major, minor, patch) ->
-    "$major${minor.padStart(2, '0')}${patch.padStart(2, '0')}".toInt()
+private fun Task.bakeNamedToIntermediaryMappings(mappings: Mappings, destination: File) {
+    mappings.tasks.forEach { this.dependsOn(it) }
+    inputs.file(mappings.file)
+    outputs.file(destination)
+    doLast {
+        val mapping = if (mappings.format == "tiny") {
+            val tiny = mappings.file.inputStream().use { MappingsProvider.readTinyMappings(it) }
+            TinyReader(tiny, "named", "intermediary", false).read()
+        } else {
+            MappingFormats.byId(mappings.format).read(mappings.file.toPath())
+        }
+        MappingFormats.SRG.write(mapping, destination.toPath())
+    }
 }
 
-private fun Project.byVersion(version: Int): Project {
-    val name = "${version/10000}.${version/100 % 100}${if (version%100 == 0) "" else ".${version%100}"}"
-    return project.parent!!.evaluationDependsOn(name)
+private fun Task.bakeNamedToOfficialMappings(mappings: Mappings, namedToIntermediaryMappings: Mappings?, destination: File) {
+    mappings.tasks.forEach { this.dependsOn(it) }
+    namedToIntermediaryMappings?.tasks?.forEach { dependsOn(it) }
+    inputs.file(mappings.file)
+    namedToIntermediaryMappings?.let { inputs.file(it.file) }
+    outputs.file(destination)
+    doLast {
+        val mapping = if (mappings.format == "tiny") {
+            val tiny = mappings.file.inputStream().use { MappingsProvider.readTinyMappings(it) }
+            TinyReader(tiny, "named", "official", false).read()
+        } else {
+            val iMappings = namedToIntermediaryMappings!!
+            val iMapSet = MappingFormats.byId(iMappings.format).read(iMappings.file.toPath())
+            val oMapSet = MappingFormats.byId(mappings.format).read(mappings.file.toPath())
+            oMapSet.join(iMapSet.reverse()).reverse()
+        }
+        MappingFormats.SRG.write(mapping, destination.toPath())
+    }
 }
 
-private fun findMappingFiles(project: Project): NavigableMap<Int, File> =
-        project.file("../").listFiles()!!.mapNotNull {
-            val mappingFile = File(it, "mapping.txt")
-            if (mappingFile.exists()) {
-                val (major, minor, patch) = it.name.split(".") + listOf(null)
-                val version = "$major${minor?.padStart(2, '0')}${(patch ?: "").padStart(2, '0')}"
-                Pair(version.toInt(), mappingFile)
-            } else {
-                null
-            }
-        }.toMap(TreeMap())
-
-
-private val Project.intermediaryMappings: Pair<File, List<Task>>?
+private val Project.intermediaryMappings: Mappings?
     get() {
         project.tasks.findByName("genSrgs")?.let { // FG2
-            return Pair(it.property("mcpToSrg") as File, listOf(it))
+            return Mappings("searge", it.property("mcpToSrg") as File, "srg", listOf(it))
         }
         project.tasks.findByName("createMcpToSrg")?.let { // FG3
-            return Pair(it.property("output") as File, listOf(it))
+            return Mappings("searge", it.property("output") as File, "tsrg", listOf(it))
         }
+        tinyMappings?.let { return Mappings("yarn", it, "tiny", emptyList()) }
         return null
+    }
+
+data class Mappings(val type: String, val file: File, val format: String, val tasks: List<Task>)
+
+private val Project.notchMappings: Mappings?
+    get() {
+        project.tasks.findByName("extractSrg")?.let { // FG3
+            return Mappings("notch", it.property("output") as File, "tsrg", listOf(it))
+        }
+        tinyMappings?.let { return Mappings("notch", it, "tiny", emptyList()) }
+        return null
+    }
+
+private val Project.tinyMappings: File?
+    get() {
+        val extension = extensions.findByName("minecraft") ?: return null
+        if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
+        return extension.withGroovyBuilder { getProperty("mappingsProvider") }.withGroovyBuilder { getProperty("MAPPINGS_TINY") } as File
     }

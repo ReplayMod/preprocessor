@@ -4,6 +4,7 @@ import com.replaymod.gradle.remap.Transformer
 import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
 import org.cadixdev.lorenz.MappingSet
+import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
@@ -107,20 +108,27 @@ open class PreprocessTask : DefaultTask() {
 
         val mapping = mapping
         val classpath = classpath
-        if (mapping != null && classpath != null) {
-            val mappings = if (sourceMappings?.exists() == true && destinationMappings?.exists() == true) {
-                val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
-                val clsMap = legacyMap.splitOffClassMappings()
+        if (classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
+            val mappings = if (mapping != null) {
+                if (sourceMappings != null && destinationMappings != null) {
+                    val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
+                    val clsMap = legacyMap.splitOffClassMappings()
+                    val srcMap = sourceMappings!!.readMappings()
+                    val dstMap = destinationMappings!!.readMappings()
+                    legacyMap.mergeBoth(
+                            // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
+                            // dstMap and would otherwise be filtered by the join)
+                            srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
+                            MappingSet.create(LegacyMappingSetModelFactory()))
+                } else {
+                    LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
+                }
+            } else {
                 val srcMap = sourceMappings!!.readMappings()
                 val dstMap = destinationMappings!!.readMappings()
-                legacyMap.mergeBoth(
-                        // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
-                        // dstMap and would otherwise be filtered by the join)
-                        srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
-                        MappingSet.create(LegacyMappingSetModelFactory()))
-            } else {
-                LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
+                srcMap.join(dstMap.reverse())
             }
+            MappingFormats.SRG.write(mappings, project.file("tmp.srg").toPath())
             val javaTransformer = Transformer(mappings)
             LOGGER.debug("Remap Classpath:")
             javaTransformer.classpath = classpath.files.mapNotNull {

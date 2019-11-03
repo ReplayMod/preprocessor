@@ -41,10 +41,12 @@ repositories {
     mavenLocal()
     mavenCentral()
     maven(url = "https://jitpack.io")
+    maven(url = "https://maven.fabricmc.net")
 }
 
 dependencies {
     implementation(gradleApi())
     compile(localGroovy())
-    implementation("com.github.replaymod:remap:fb0e54a")
+    implementation("com.github.replaymod:remap:64d841a")
+    implementation("net.fabricmc:tiny-mappings-parser:0.1.1.8")
 }
