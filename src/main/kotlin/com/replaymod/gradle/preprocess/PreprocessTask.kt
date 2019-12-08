@@ -6,6 +6,7 @@ import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
 import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
@@ -104,7 +105,7 @@ open class PreprocessTask : DefaultTask() {
         val inPath = source.toPath()
         val outPath = generated!!.toPath()
         val inPlace = inPath.toAbsolutePath() == outPath.toAbsolutePath()
-        var mappedSources: Map<String, String>? = null
+        var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
 
         val mapping = mapping
         val classpath = classpath
@@ -156,7 +157,13 @@ open class PreprocessTask : DefaultTask() {
             val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
             if (kws != null) {
                 val javaTransform = { lines: List<String> ->
-                    mappedSources?.get(relPath.toString())?.lines() ?: lines
+                    mappedSources?.get(relPath.toString())?.let { (source, errors) ->
+                        val errorsByLine = mutableMapOf<Int, MutableList<String>>()
+                        for ((line, error) in errors) {
+                            errorsByLine.getOrPut(line, ::mutableListOf).add(error)
+                        }
+                        source.lines().mapIndexed { index: Int, line: String -> Pair(line, errorsByLine[index] ?: emptyList<String>()) }
+                    } ?: lines.map { Pair(it, emptyList()) }
                 }
                 commentPreprocessor.convertFile(kws.value, file, outFile, javaTransform)
             } else if (!inPlace) {
@@ -165,6 +172,10 @@ open class PreprocessTask : DefaultTask() {
                     into(outFile.parentFile)
                 }
             }
+        }
+
+        if (commentPreprocessor.fail) {
+            throw GradleException("Failed to remap sources. See errors above for details.")
         }
     }
 }
@@ -175,6 +186,8 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         private val OR_PATTERN = Pattern.quote("||").toPattern()
         private val AND_PATTERN = Pattern.quote("&&").toPattern()
     }
+
+    var fail = false
 
     private fun String.evalVar() = toIntOrNull() ?: vars[this] ?: throw NoSuchElementException(this)
 
@@ -209,15 +222,17 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
     private val String.indentation: Int
         get() = takeWhile { it == ' ' }.length
 
-    fun convertSource(kws: Keywords, lines: List<String>, remapped: List<String>, fileName: String): List<String> {
+    fun convertSource(kws: Keywords, lines: List<String>, remapped: List<Pair<String, List<String>>>, fileName: String): List<String> {
         val ifStack = mutableListOf<Boolean>()
         val indentStack = mutableListOf<Int>()
         var active = true
         var n = 0
-        return lines.zip(remapped).map { (originalLine, line) ->
+        return lines.zip(remapped).map { (originalLine, lineMapped) ->
+            val (line, errors) = lineMapped
+            var ignoreErrors = false
             n++
             val trimmed = line.trim()
-            if (trimmed.startsWith(kws.`if`)) {
+            val mapped = if (trimmed.startsWith(kws.`if`)) {
                 val result = trimmed.substring(kws.`if`.length).trim().evalExpr()
                 ifStack.push(result)
                 indentStack.push(line.indentation)
@@ -269,12 +284,20 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                         // and, more importantly, if we do not preserve it, we might permanently loose it as the
                         // remap process is only guaranteed to work on code which compiles and since we're
                         // just about to comment it out, it probably doesn't compile.
+                        ignoreErrors = true
                         " ".repeat(currIndent) + kws.eval + " " + originalLine.substring(currIndent)
                     } else {
                         line
                     }
                 }
             }
+            if (errors.isNotEmpty() && !ignoreErrors) {
+                fail = true
+                for (message in errors) {
+                    System.err.println("$fileName:$n: $message")
+                }
+            }
+            mapped
         }.also {
             if (ifStack.isNotEmpty()) {
                 throw ParserException("Missing endif in $fileName")
@@ -282,10 +305,10 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         }
     }
 
-    fun convertFile(kws: Keywords, inFile: File, outFile: File, remap: ((List<String>) -> List<String>)? = null) {
+    fun convertFile(kws: Keywords, inFile: File, outFile: File, remap: ((List<String>) -> List<Pair<String, List<String>>>)? = null) {
         val string = inFile.readText()
         var lines = string.lines()
-        val remapped = remap?.invoke(lines) ?: lines
+        val remapped = remap?.invoke(lines) ?: lines.map { Pair(it, emptyList()) }
         try {
             lines = convertSource(kws, lines, remapped, inFile.path)
         } catch (e: Throwable) {
