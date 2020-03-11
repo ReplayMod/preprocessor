@@ -1,6 +1,6 @@
 package com.replaymod.gradle.preprocess
 
-import net.fabricmc.mappings.MappingsProvider
+import net.fabricmc.mapping.tree.TinyMappingFactory
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
@@ -162,8 +162,8 @@ private fun Task.bakeNamedToIntermediaryMappings(mappings: Mappings, destination
     outputs.file(destination)
     doLast {
         val mapping = if (mappings.format == "tiny") {
-            val tiny = mappings.file.inputStream().use { MappingsProvider.readTinyMappings(it) }
-            TinyReader(tiny, "named", "intermediary", false).read()
+            val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
+            TinyReader(tiny, "named", "intermediary").read()
         } else {
             MappingFormats.byId(mappings.format).read(mappings.file.toPath())
         }
@@ -179,8 +179,8 @@ private fun Task.bakeNamedToOfficialMappings(mappings: Mappings, namedToIntermed
     outputs.file(destination)
     doLast {
         val mapping = if (mappings.format == "tiny") {
-            val tiny = mappings.file.inputStream().use { MappingsProvider.readTinyMappings(it) }
-            TinyReader(tiny, "named", "official", false).read()
+            val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
+            TinyReader(tiny, "named", "official").read()
         } else {
             val iMappings = namedToIntermediaryMappings!!
             val iMapSet = MappingFormats.byId(iMappings.format).read(iMappings.file.toPath())
