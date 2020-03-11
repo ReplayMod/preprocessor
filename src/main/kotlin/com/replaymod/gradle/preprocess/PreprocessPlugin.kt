@@ -58,6 +58,7 @@ class PreprocessPlugin : Plugin<Project> {
                 val preprocessedResources = File(project.buildDir, "preprocessed/$name/resources")
 
                 val preprocessJava = project.tasks.register<PreprocessTask>("preprocess${cName}Java") {
+                    inherited.tasks.findByPath("preprocess${cName}Java")?.let { dependsOn(it) }
                     source = inherited.file(inheritedSourceSet.java.srcDirs.first())
                     generated = preprocessedJava
                     compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
@@ -75,6 +76,7 @@ class PreprocessPlugin : Plugin<Project> {
 
                 if (kotlin) {
                     val preprocessKotlin = project.tasks.register<PreprocessTask>("preprocess${cName}Kotlin") {
+                        inherited.tasks.findByPath("preprocess${cName}Kotlin")?.let { dependsOn(it) }
                         source = inherited.file(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.first())
                         generated = preprocessedKotlin
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
@@ -91,6 +93,7 @@ class PreprocessPlugin : Plugin<Project> {
                 }
 
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
+                    inherited.tasks.findByPath("preprocess${cName}Resources")?.let { dependsOn(it) }
                     source = inherited.file(inheritedSourceSet.resources.srcDirs.first())
                     generated = preprocessedResources
                     vars.convention(ext.vars)
