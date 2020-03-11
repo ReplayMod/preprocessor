@@ -2,6 +2,7 @@ package com.replaymod.gradle.preprocess
 
 import net.fabricmc.mappings.MappingsProvider
 import org.cadixdev.lorenz.io.MappingFormats
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
@@ -217,5 +218,10 @@ private val Project.tinyMappings: File?
     get() {
         val extension = extensions.findByName("minecraft") ?: return null
         if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
-        return extension.withGroovyBuilder { getProperty("mappingsProvider") }.withGroovyBuilder { getProperty("MAPPINGS_TINY") } as File
+        val mappingsProvider = extension.withGroovyBuilder { getProperty("mappingsProvider") }
+        mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
+        mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.let { return it as File } // loom 0.2.6
+        throw GradleException("loom version not supported by preprocess plugin")
     }
+
+private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)
