@@ -129,7 +129,7 @@ open class PreprocessTask : DefaultTask() {
                 val dstMap = destinationMappings!!.readMappings()
                 srcMap.join(dstMap.reverse())
             }
-            MappingFormats.SRG.write(mappings, project.file("tmp.srg").toPath())
+            MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath())
             val javaTransformer = Transformer(mappings)
             LOGGER.debug("Remap Classpath:")
             javaTransformer.classpath = classpath.files.mapNotNull {
