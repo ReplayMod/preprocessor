@@ -17,6 +17,7 @@ import org.jetbrains.kotlin.backend.common.push
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.Serializable
+import java.nio.file.Files
 import java.util.regex.Pattern
 
 data class Keywords(
@@ -129,7 +130,9 @@ open class PreprocessTask : DefaultTask() {
                 val dstMap = destinationMappings!!.readMappings()
                 srcMap.join(dstMap.reverse())
             }
-            MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath())
+            MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath().also {
+                Files.createDirectories(it.parent)
+            })
             val javaTransformer = Transformer(mappings)
             LOGGER.debug("Remap Classpath:")
             javaTransformer.classpath = classpath.files.mapNotNull {
