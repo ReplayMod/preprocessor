@@ -153,6 +153,8 @@ open class PreprocessTask : DefaultTask() {
             mappedSources = javaTransformer.remap(sources)
         }
 
+        project.delete(outPath)
+
         val commentPreprocessor = CommentPreprocessor(vars.get())
         project.fileTree(source).forEach { file ->
             val relPath = inPath.relativize(file.toPath())
