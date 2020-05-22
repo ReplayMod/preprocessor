@@ -47,6 +47,6 @@ repositories {
 dependencies {
     implementation(gradleApi())
     compile(localGroovy())
-    implementation("com.github.replaymod:remap:19874df")
+    implementation("com.github.replaymod:remap:39b3db9")
     implementation("net.fabricmc:tiny-mappings-parser:0.2.1.13")
 }
