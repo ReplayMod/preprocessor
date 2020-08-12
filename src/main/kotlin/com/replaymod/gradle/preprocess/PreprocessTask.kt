@@ -187,7 +187,7 @@ open class PreprocessTask : DefaultTask() {
 
 class CommentPreprocessor(private val vars: Map<String, Int>) {
     companion object {
-        private val EXPR_PATTERN = Pattern.compile("(.+)(<=|>=|<|>)(.+)")
+        private val EXPR_PATTERN = Pattern.compile("(.+)(==|!=|<=|>=|<|>)(.+)")
         private val OR_PATTERN = Pattern.quote("||").toPattern()
         private val AND_PATTERN = Pattern.quote("&&").toPattern()
     }
@@ -213,6 +213,8 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
             val lhs = matcher.group(1).trim().evalVar()
             val rhs = matcher.group(3).trim().evalVar()
             return when (matcher.group(2)) {
+                "==" -> lhs == rhs
+                "!=" -> lhs != rhs
                 ">=" -> lhs >= rhs
                 "<=" -> lhs <= rhs
                 ">" -> lhs > rhs
