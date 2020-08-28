@@ -194,7 +194,8 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
 
     var fail = false
 
-    private fun String.evalVar() = toIntOrNull() ?: vars[this] ?: throw NoSuchElementException(this)
+    private fun String.evalVarOrNull() = toIntOrNull() ?: vars[this]
+    private fun String.evalVar() = evalVarOrNull() ?: throw NoSuchElementException(this)
 
     private fun String.evalExpr(): Boolean {
         split(OR_PATTERN).let { parts ->
@@ -206,6 +207,11 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
             if (parts.size > 1) {
                 return parts.all { it.trim().evalExpr() }
             }
+        }
+
+        val result = evalVarOrNull()
+        if (result != null) {
+            return result != 0
         }
 
         val matcher = EXPR_PATTERN.matcher(this)
