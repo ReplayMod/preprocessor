@@ -197,7 +197,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
     private fun String.evalVarOrNull() = toIntOrNull() ?: vars[this]
     private fun String.evalVar() = evalVarOrNull() ?: throw NoSuchElementException(this)
 
-    private fun String.evalExpr(): Boolean {
+    internal fun String.evalExpr(): Boolean {
         split(OR_PATTERN).let { parts ->
             if (parts.size > 1) {
                 return parts.any { it.trim().evalExpr() }
