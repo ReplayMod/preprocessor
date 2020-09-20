@@ -23,6 +23,7 @@ import java.util.regex.Pattern
 data class Keywords(
         val `if`: String,
         val ifdef: String,
+        val elseif: String,
         val `else`: String,
         val endif: String,
         val eval: String
@@ -34,6 +35,7 @@ open class PreprocessTask : DefaultTask() {
         val DEFAULT_KEYWORDS = Keywords(
                 `if` = "//#if ",
                 ifdef = "//#ifdef ",
+                elseif = "//#elseif",
                 `else` = "//#else",
                 endif = "//#endif",
                 eval = "//$$"
@@ -42,6 +44,7 @@ open class PreprocessTask : DefaultTask() {
         val CFG_KEYWORDS = Keywords(
                 `if` = "##if ",
                 ifdef = "##ifdef ",
+                elseif = "##elseif",
                 `else` = "##else",
                 endif = "##endif",
                 eval = "#$$"
@@ -236,10 +239,11 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         get() = takeWhile { it == ' ' }.length
 
     fun convertSource(kws: Keywords, lines: List<String>, remapped: List<Pair<String, List<String>>>, fileName: String): List<String> {
-        val ifStack = mutableListOf<Boolean>()
+        val stack = mutableListOf<IfStackEntry>()
         val indentStack = mutableListOf<Int>()
         var active = true
         var n = 0
+
         return lines.zip(remapped).map { (originalLine, lineMapped) ->
             val (line, errors) = lineMapped
             var ignoreErrors = false
@@ -247,32 +251,55 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
             val trimmed = line.trim()
             val mapped = if (trimmed.startsWith(kws.`if`)) {
                 val result = trimmed.substring(kws.`if`.length).trim().evalExpr()
-                ifStack.push(result)
+                stack.push(IfStackEntry(result, elseFound = false, trueFound = result))
                 indentStack.push(line.indentation)
                 active = active && result
                 line
-            } else if (trimmed.startsWith(kws.`else`)) {
-                if (ifStack.isEmpty()) {
-                    throw ParserException("Unexpected else in line $n of $fileName")
+            } else if (trimmed.startsWith(kws.elseif)) {
+                if (stack.isEmpty()) {
+                    throw ParserException("Unexpected elseif in line $n of $fileName")
                 }
-                ifStack.push(!ifStack.pop())
+                if (stack.last().elseFound) {
+                    throw ParserException("Unexpected elseif after else in line $n of $fileName")
+                }
+
                 indentStack.pop()
                 indentStack.push(line.indentation)
-                active = ifStack.all { it }
+
+                active = if (stack.last().trueFound) {
+                    val last = stack.pop()
+                    stack.push(last.copy(currentValue = false))
+                    false
+                } else {
+                    val result = trimmed.substring(kws.elseif.length).trim().evalExpr()
+                    stack.pop()
+                    stack.push(IfStackEntry(result, elseFound = false, trueFound = result))
+                    stack.all { it.currentValue }
+                }
+                line
+            } else if (trimmed.startsWith(kws.`else`)) {
+                if (stack.isEmpty()) {
+                    throw ParserException("Unexpected else in line $n of $fileName")
+                }
+                val entry = stack.pop()
+                stack.push(IfStackEntry(!entry.trueFound, elseFound = true, trueFound = entry.trueFound))
+                indentStack.pop()
+                indentStack.push(line.indentation)
+                active = stack.all { it.currentValue }
                 line
             } else if (trimmed.startsWith(kws.ifdef)) {
                 val result = vars.containsKey(trimmed.substring(kws.ifdef.length))
-                ifStack.push(result)
+                stack.push(IfStackEntry(result, elseFound = false, trueFound = result))
                 indentStack.push(line.indentation)
                 active = active && result
                 line
             } else if (trimmed.startsWith(kws.endif)) {
-                if (ifStack.isEmpty()) {
+                if (stack.isEmpty()) {
                     throw ParserException("Unexpected endif in line $n of $fileName")
                 }
-                ifStack.pop()
+                stack.pop()
                 indentStack.pop()
-                active = ifStack.all { it }
+                active = stack.all { it.currentValue }
                 line
             } else {
                 if (active) {
@@ -312,7 +339,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
             }
             mapped
         }.also {
-            if (ifStack.isNotEmpty()) {
+            if (stack.isNotEmpty()) {
                 throw ParserException("Missing endif in $fileName")
             }
         }
@@ -333,6 +360,12 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         outFile.parentFile.mkdirs()
         outFile.writeText(lines.joinToString("\n"))
     }
+
+    data class IfStackEntry(
+        var currentValue: Boolean,
+        var elseFound: Boolean = false,
+        var trueFound: Boolean = false
+    )
 
     class ParserException(str: String): RuntimeException(str)
 }
