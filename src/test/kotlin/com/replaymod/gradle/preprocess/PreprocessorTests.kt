@@ -104,6 +104,17 @@ class PreprocessorTests : FunSpec({
             test("throws on unexpected else") {
                 shouldThrow<CommentPreprocessor.ParserException> { "//#else".convert() }
             }
+            test("throws on unexpected elseif") {
+                shouldThrow<CommentPreprocessor.ParserException> { "//#elseif".convert() }
+            }
+            test("throws on elseif after else") {
+                shouldThrow<CommentPreprocessor.ParserException> { """
+                    //#if t
+                    //#else
+                    //#elseif t
+                    //#endif
+                """.convert() }
+            }
             test("throws on missing endif") {
                 shouldThrow<CommentPreprocessor.ParserException> { "//#if t".convert() }
                 shouldThrow<CommentPreprocessor.ParserException> { "//#if t\n//#if t\n//#endif".convert() }
@@ -204,6 +215,226 @@ class PreprocessorTests : FunSpec({
                     //#endif
                 """)
             }
+            test("if t .. elseif f .. endif") {
+                """
+                    //#if t
+                    code
+                    //#elseif f
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif f
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if t
+                    //$$ code
+                    //#elseif f
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif f
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if t
+                    code
+                    //#elseif f
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif f
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if t
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif f
+                    //$$ code
+                    //#endif
+                """)
+            }
+            test("if f .. elseif t .. endif") {
+                """
+                    //#if f
+                    code
+                    //#elseif t
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#endif
+                """)
+                """
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#endif
+                """)
+                """
+                    //#if f
+                    code
+                    //#elseif t
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#endif
+                """)
+                """
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#endif
+                """)
+            }
+            test("if t .. elseif t .. endif") {
+                """
+                    //#if t
+                    //$$ code
+                    //#elseif t
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif t
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if t
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif t
+                    //$$ code
+                    //#endif
+                """)
+            }
+            test("if .. elseif .. else .. endif") {
+                """
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#else
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if t
+                    //$$ code
+                    //#elseif t
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    code
+                    //#elseif t
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if f
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#else
+                    code
+                    //#endif
+                """)
+            }
+            test("multiple elseifs") {
+                """
+                    //#if f
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#elseif t
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#elseif f
+                    //$$ code
+                    //#elseif t
+                    code
+                    //#elseif f
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """)
+            }
             test("nested if") {
                 """
                     //#if f
@@ -232,6 +463,119 @@ class PreprocessorTests : FunSpec({
                         //#else
                         code
                         //#endif
+                    //#endif
+                """)
+            }
+            test("nested elseifs") {
+                """
+                    //#if f
+                        //#if f
+                        //$$ code
+                        //#else
+                        //$$ code
+                        //#endif
+                    //#elseif t
+                    //$$ code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                        //#if f
+                        //$$ code
+                        //#else
+                        //$$ code
+                        //#endif
+                    //#elseif t
+                    code
+                    //#endif
+                """)
+                """
+                    //#if f
+                    code
+                    //#elseif t
+                        //#if f
+                        code
+                        //#else
+                        code
+                        //#endif
+                    //#elseif f
+                    code
+                    //#else
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif t
+                        //#if f
+                        //$$ code
+                        //#else
+                        code
+                        //#endif
+                    //#elseif f
+                    //$$ code
+                    //#else
+                    //$$ code
+                    //#endif
+                """)
+                """
+                    //#if f
+                    code
+                    //#elseif f
+                        //#if f
+                        code
+                        //#else
+                        code
+                        //#endif
+                    //#elseif f
+                    code
+                    //#else
+                    code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if f
+                    //$$ code
+                    //#elseif f
+                        //#if f
+                        //$$ code
+                        //#else
+                        //$$ code
+                        //#endif
+                    //#elseif f
+                    //$$ code
+                    //#else
+                    code
+                    //#endif
+                """)
+                """
+                    //#if t
+                    //#elseif t
+                        //#if t
+                        code
+                        //#else
+                        //#endif
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    //#elseif t
+                        //#if t
+                        //$$ code
+                        //#else
+                        //#endif
+                    //#endif
+                """)
+                """
+                    //#if t
+                    //#elseif t
+                        //#if t
+                        //#endif
+                        code
+                    //#endif
+                """.convert().shouldBe("""
+                    //#if t
+                    //#elseif t
+                        //#if t
+                        //#endif
+                    //$$     code
                     //#endif
                 """)
             }
