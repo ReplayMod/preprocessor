@@ -53,7 +53,7 @@ repositories {
 dependencies {
     implementation(gradleApi())
     compile(localGroovy())
-    implementation("com.github.replaymod:remap:39b3db9")
+    implementation("com.github.replaymod:remap:e49dc89")
     implementation("net.fabricmc:tiny-mappings-parser:0.2.1.13")
     testImplementation("io.kotest:kotest-runner-junit5-jvm:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core-jvm:$kotestVersion")
