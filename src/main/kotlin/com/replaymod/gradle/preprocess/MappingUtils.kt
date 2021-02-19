@@ -2,9 +2,7 @@ package com.replaymod.gradle.preprocess
 
 import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
-import org.cadixdev.lorenz.model.ClassMapping
-import org.cadixdev.lorenz.model.InnerClassMapping
-import org.cadixdev.lorenz.model.TopLevelClassMapping
+import org.cadixdev.lorenz.model.*
 import java.io.File
 
 fun File.readMappings(): MappingSet {
@@ -63,7 +61,7 @@ fun <T : ClassMapping<T, *>> ClassMapping<T, *>.mergeBoth(b: ClassMapping<T, *>,
     fieldMappings.forEach {
         val bField = b.getFieldMapping(it.deobfuscatedName).orElse(null)
         if (bField != null) {
-            it.merge(bField, merged)
+            it.join(bField, merged)
         } else {
             it.copy(merged)
         }
@@ -76,7 +74,7 @@ fun <T : ClassMapping<T, *>> ClassMapping<T, *>.mergeBoth(b: ClassMapping<T, *>,
     methodMappings.forEach {
         val bMethod = b.getMethodMapping(it.deobfuscatedSignature).orElse(null)
         if (bMethod != null) {
-            it.merge(bMethod, merged)
+            it.join(bMethod, merged)
         } else {
             it.copy(merged)
         }
@@ -91,7 +89,7 @@ fun <T : ClassMapping<T, *>> ClassMapping<T, *>.mergeBoth(b: ClassMapping<T, *>,
         if (bClass != null) {
             val mergedInner = merged.getOrCreateInnerClassMapping(obfuscatedName)
             mergedInner.deobfuscatedName = bClass.deobfuscatedName
-            aClass.merge(bClass, mergedInner)
+            aClass.mergeBoth(bClass, mergedInner)
         } else {
             aClass.copy(merged)
         }
@@ -118,12 +116,12 @@ fun TopLevelClassMapping.join(b: TopLevelClassMapping, into: MappingSet) {
     merged.deobfuscatedName = b.deobfuscatedName
     fieldMappings.forEach { fieldA ->
         b.getFieldMapping(fieldA.deobfuscatedSignature).ifPresent { fieldB ->
-            fieldA.merge(fieldB, merged)
+            fieldA.join(fieldB, merged)
         }
     }
     methodMappings.forEach { methodA ->
         b.getMethodMapping(methodA.deobfuscatedSignature).ifPresent { methodB ->
-            methodA.merge(methodB, merged)
+            methodA.join(methodB, merged)
         }
     }
     innerClassMappings.forEach { classA ->
@@ -138,12 +136,12 @@ fun InnerClassMapping.join(b: InnerClassMapping, into: ClassMapping<*, *>) {
     merged.deobfuscatedName = b.deobfuscatedName
     fieldMappings.forEach { fieldA ->
         b.getFieldMapping(fieldA.deobfuscatedSignature).ifPresent { fieldB ->
-            fieldA.merge(fieldB, merged)
+            fieldA.join(fieldB, merged)
         }
     }
     methodMappings.forEach { methodA ->
         b.getMethodMapping(methodA.deobfuscatedSignature).ifPresent { methodB ->
-            methodA.merge(methodB, merged)
+            methodA.join(methodB, merged)
         }
     }
     innerClassMappings.forEach { classA ->
@@ -152,3 +150,19 @@ fun InnerClassMapping.join(b: InnerClassMapping, into: ClassMapping<*, *>) {
         }
     }
 }
+
+// Like FieldMapping.merge but not horribly slow in newer lorenz versions
+fun FieldMapping.join(with: FieldMapping, parent: ClassMapping<*, *>): FieldMapping =
+        parent.createFieldMapping(signature)
+                .setDeobfuscatedName(with.deobfuscatedName)
+
+// Like FieldMapping.merge but not horribly slow in newer lorenz versions
+fun MethodMapping.join(with: MethodMapping, parent: ClassMapping<*, *>): MethodMapping =
+        parent.createMethodMapping(signature)
+                .setDeobfuscatedName(with.deobfuscatedName)
+                .also { merged ->
+                    parameterMappings.forEach { paramA ->
+                        val paramB = with.getOrCreateParameterMapping(paramA.index)
+                        paramA.merge(paramB, merged)
+                    }
+                }
