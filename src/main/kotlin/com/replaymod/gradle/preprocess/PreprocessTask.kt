@@ -7,9 +7,11 @@ import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
+import org.gradle.api.file.ConfigurableFileTree
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
+import org.gradle.kotlin.dsl.fileTree
 import org.gradle.kotlin.dsl.mapProperty
 import org.jetbrains.kotlin.backend.common.peek
 import org.jetbrains.kotlin.backend.common.pop
@@ -56,9 +58,18 @@ open class PreprocessTask : DefaultTask() {
     @OutputDirectory
     var generated: File? = null
 
-    @InputDirectory
+    @Internal
+    var source: FileCollection? = null
+
+    @InputFiles
     @SkipWhenEmpty
-    var source: File? = null
+    fun getSourceFileTrees(): List<ConfigurableFileTree>? {
+        return source?.map { project.fileTree(it) }
+    }
+
+    @InputDirectory
+    @Optional
+    var overwrites: File? = null
 
     @InputFile
     @Optional
@@ -86,16 +97,11 @@ open class PreprocessTask : DefaultTask() {
     val keywords = project.objects.mapProperty<String, Keywords>()
 
     fun source(file: Any) {
-        source = project.file(file)
+        source = project.files(file)
     }
 
     fun generated(file: Any) {
         generated = project.file(file)
-    }
-
-    fun inplace(file: Any) {
-        source(file)
-        generated(file)
     }
 
     fun compileTask(task: AbstractCompile) {
@@ -106,9 +112,8 @@ open class PreprocessTask : DefaultTask() {
     @TaskAction
     fun preprocess() {
         val source = source!!
-        val inPath = source.toPath()
         val outPath = generated!!.toPath()
-        val inPlace = inPath.toAbsolutePath() == outPath.toAbsolutePath()
+        val overwritesPath = overwrites?.toPath()
         var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
 
         val mapping = mapping
@@ -147,9 +152,9 @@ open class PreprocessTask : DefaultTask() {
                 }
             }.toTypedArray()
             val sources = mutableMapOf<String, String>()
-            project.fileTree(source).forEach { file ->
+            source.flatMap { base -> project.fileTree(base).map { Pair(base, it) } }.forEach { (base, file) ->
                 if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
-                    val relPath = inPath.relativize(file.toPath())
+                    val relPath = base.toPath().relativize(file.toPath())
                     sources[relPath.toString()] = file.readText()
                 }
             }
@@ -159,9 +164,12 @@ open class PreprocessTask : DefaultTask() {
         project.delete(outPath)
 
         val commentPreprocessor = CommentPreprocessor(vars.get())
-        project.fileTree(source).forEach { file ->
-            val relPath = inPath.relativize(file.toPath())
+        source.flatMap { base -> project.fileTree(base).map { Pair(base, it) } }.forEach { (base, file) ->
+            val relPath = base.toPath().relativize(file.toPath())
             val outFile = outPath.resolve(relPath).toFile()
+            if (overwritesPath != null && Files.exists(overwritesPath.resolve(relPath))) {
+                return@forEach
+            }
             val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
             if (kws != null) {
                 val javaTransform = { lines: List<String> ->
@@ -174,7 +182,7 @@ open class PreprocessTask : DefaultTask() {
                     } ?: lines.map { Pair(it, emptyList()) }
                 }
                 commentPreprocessor.convertFile(kws.value, file, outFile, javaTransform)
-            } else if (!inPlace) {
+            } else {
                 project.copy {
                     from(file)
                     into(outFile.parentFile)

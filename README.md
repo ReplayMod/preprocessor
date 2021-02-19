@@ -47,6 +47,15 @@ Care should also be taken that switching to a different branch and back doesn't 
 The `replaymod_at.cfg` file uses the same preprocessor but with different keywords (see already existent examples in that file).
 If required, more file extensions and keywords can be added to the implementation.
 
+## Per-version files
+
+If entire files are very version specific, they may be overwritten for any version by placing a new file with the same package and name in `versions/$MCVERSION/src/main/java` (or the respective source set / language folder).
+If such a file is present, the overwritten file will no longer be derived from another version and any downstream versions will be derived from the new file instead.
+This also has the huge advantage that the file may be edited with full IDE support because it is actually part of the respective version's Gradle project.
+
+This feature is fully compatible with `setCoreVersion` and overwrite files will be moved generated/removed as required such that switching back and forth leaves the same result as you started out with.
+The core project itself does not allow for overwrites and any present in its folder will be deleted on `setCoreVersion`.
+
 ## License
 The Preprocessor is provided under the terms of the GNU General Public License Version 3 or (at your option) any later version.
 See `LICENSE.md` for the full license text.
