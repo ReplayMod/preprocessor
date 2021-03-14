@@ -76,6 +76,7 @@ class PreprocessPlugin : Plugin<Project> {
                     reverseMapping = reverseMappings
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
+                    patternAnnotation.convention(ext.patternAnnotation)
                 }
                 val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
@@ -92,6 +93,7 @@ class PreprocessPlugin : Plugin<Project> {
                         reverseMapping = reverseMappings
                         vars.convention(ext.vars)
                         keywords.convention(ext.keywords)
+                        patternAnnotation.convention(ext.patternAnnotation)
                     }
                     val kotlinConsumerTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
                             ?: project.tasks["compile${cName}Kotlin"]
@@ -108,6 +110,7 @@ class PreprocessPlugin : Plugin<Project> {
                     generated = preprocessedResources
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
+                    patternAnnotation.convention(ext.patternAnnotation)
                 }
                 project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
                 resources.setSrcDirs(listOf(overwriteResources, preprocessedResources))

@@ -56,6 +56,40 @@ This also has the huge advantage that the file may be edited with full IDE suppo
 This feature is fully compatible with `setCoreVersion` and overwrite files will be moved generated/removed as required such that switching back and forth leaves the same result as you started out with.
 The core project itself does not allow for overwrites and any present in its folder will be deleted on `setCoreVersion`.
 
+## Patterns
+
+The preprocessor also supports defining simple "search and replace"-like patterns (but smarter in that they are type-aware) annotated by a `@Pattern` annotation in one or more central places which then are applied all over the code base.
+This allows code which would previously have to be written with preprocessor statements or as `MCVer.getWindow(mc)` all over the code base to instead now use the much more intuitive `mc.getWindow()` and be automatically converted to `mc.window` (or even a Window stub object) on remap if a pattern for that exists anywhere in the same source tree:
+```java
+    @Pattern
+    private static Window getWindow(MinecraftClient mc) {
+        //#if MC>=11500
+        return mc.getWindow();
+        //#elseif MC>=11400
+        //$$ return mc.window;
+        //#else
+        //$$ return new com.replaymod.core.versions.Window(mc);
+        //#endif
+    }
+```
+All pattern cases should be a single line as to not mess with indentation and/or line count.
+Any arguments passed to the pattern must be used in the pattern in the same order in every case (introducing in-line locals to work around that is fine).
+Defining and/or applying patterns in/on Kotlin code is not yet supported.
+
+To use this feature, you must create a `Pattern` (name may be different) annotation in your mod:
+```java
+@Retention(RetentionPolicy.SOURCE)
+@Target(ElementType.METHOD)
+public @interface Pattern {
+}
+```
+and then declare it in your `build.gradle`:
+```groovy
+preprocess {
+    patternAnnotation.set("com.replaymod.gradle.remap.Pattern")
+}
+```
+
 ## License
 The Preprocessor is provided under the terms of the GNU General Public License Version 3 or (at your option) any later version.
 See `LICENSE.md` for the full license text.

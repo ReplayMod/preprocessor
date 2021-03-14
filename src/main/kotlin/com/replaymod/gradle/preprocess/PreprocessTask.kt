@@ -11,8 +11,8 @@ import org.gradle.api.file.ConfigurableFileTree
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
-import org.gradle.kotlin.dsl.fileTree
 import org.gradle.kotlin.dsl.mapProperty
+import org.gradle.kotlin.dsl.property
 import org.jetbrains.kotlin.backend.common.peek
 import org.jetbrains.kotlin.backend.common.pop
 import org.jetbrains.kotlin.backend.common.push
@@ -96,6 +96,10 @@ open class PreprocessTask : DefaultTask() {
     @Input
     val keywords = project.objects.mapProperty<String, Keywords>()
 
+    @Input
+    @Optional
+    val patternAnnotation = project.objects.property<String>()
+
     fun source(file: Any) {
         source = project.files(file)
     }
@@ -142,6 +146,7 @@ open class PreprocessTask : DefaultTask() {
                 Files.createDirectories(it.parent)
             })
             val javaTransformer = Transformer(mappings)
+            javaTransformer.patternAnnotation = patternAnnotation.orNull
             LOGGER.debug("Remap Classpath:")
             javaTransformer.classpath = classpath.files.mapNotNull {
                 if (it.exists()) {
@@ -152,13 +157,31 @@ open class PreprocessTask : DefaultTask() {
                 }
             }.toTypedArray()
             val sources = mutableMapOf<String, String>()
+            val processedSources = mutableMapOf<String, String>()
             source.flatMap { base -> project.fileTree(base).map { Pair(base, it) } }.forEach { (base, file) ->
                 if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
                     val relPath = base.toPath().relativize(file.toPath())
-                    sources[relPath.toString()] = file.readText()
+                    val text = file.readText()
+                    sources[relPath.toString()] = text
+                    val lines = text.lines()
+                    val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
+                    if (kws != null) {
+                        processedSources[relPath.toString()] = CommentPreprocessor(vars.get()).convertSource(
+                                kws.value,
+                                lines,
+                                lines.map { Pair(it, emptyList()) },
+                                file.toString()
+                        ).joinToString("\n")
+                    }
                 }
             }
-            mappedSources = javaTransformer.remap(sources)
+            overwritesPath?.let { base -> project.fileTree(base).map { Pair(base, it) } }?.forEach { (base, file) ->
+                if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
+                    val relPath = base.relativize(file.toPath())
+                    processedSources[relPath.toString()] = file.readText()
+                }
+            }
+            mappedSources = javaTransformer.remap(sources, processedSources)
         }
 
         project.delete(outPath)
