@@ -23,6 +23,8 @@ import java.nio.file.Files
 import java.util.regex.Pattern
 
 data class Keywords(
+        val disableRemap: String,
+        val enableRemap: String,
         val `if`: String,
         val ifdef: String,
         val elseif: String,
@@ -35,6 +37,8 @@ open class PreprocessTask : DefaultTask() {
     companion object {
         @JvmStatic
         val DEFAULT_KEYWORDS = Keywords(
+                disableRemap = "//#disable-remap",
+                enableRemap = "//#enable-remap",
                 `if` = "//#if ",
                 ifdef = "//#ifdef ",
                 elseif = "//#elseif",
@@ -44,6 +48,8 @@ open class PreprocessTask : DefaultTask() {
         )
         @JvmStatic
         val CFG_KEYWORDS = Keywords(
+                disableRemap = "##disable-remap",
+                enableRemap = "##enable-remap",
                 `if` = "##if ",
                 ifdef = "##ifdef ",
                 elseif = "##elseif",
@@ -273,6 +279,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         val stack = mutableListOf<IfStackEntry>()
         val indentStack = mutableListOf<Int>()
         var active = true
+        var remapActive = true
         var n = 0
 
         return lines.zip(remapped).map { (originalLine, lineMapped) ->
@@ -332,6 +339,18 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                 indentStack.pop()
                 active = stack.all { it.currentValue }
                 line
+            } else if (trimmed.startsWith(kws.disableRemap)) {
+                if (!remapActive) {
+                    throw ParserException("Remapping already disabled in line $n of $fileName")
+                }
+                remapActive = false
+                line
+            } else if (trimmed.startsWith(kws.enableRemap)) {
+                if (remapActive) {
+                    throw ParserException("Remapping not disabled in line $n of $fileName")
+                }
+                remapActive = true
+                line
             } else {
                 if (active) {
                     if (trimmed.startsWith(kws.eval)) {
@@ -342,8 +361,11 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                                 it
                             }
                         }
-                    } else {
+                    } else if (remapActive) {
                         line
+                    } else {
+                        ignoreErrors = true
+                        originalLine
                     }
                 } else {
                     val currIndent = indentStack.peek()!!
