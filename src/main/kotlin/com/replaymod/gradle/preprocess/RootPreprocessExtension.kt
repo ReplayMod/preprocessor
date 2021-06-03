@@ -4,11 +4,46 @@ import java.io.File
 
 open class RootPreprocessExtension : ProjectGraphNodeDSL {
     var rootNode: ProjectGraphNode? = null
+        get() = field ?: linkNodes()?.also { field = it }
+
+    private val nodes = mutableSetOf<Node>()
+
+    fun createNode(project: String, mcVersion: Int, mappings: String): Node {
+        return Node(project, mcVersion, mappings).also { nodes.add(it) }
+    }
+
+    private fun linkNodes(): ProjectGraphNode? {
+        val first = nodes.firstOrNull() ?: return null
+        val visited = mutableSetOf<Node>()
+        fun Node.breadthFirstSearch(): ProjectGraphNode {
+            val graphNode = ProjectGraphNode(project, mcVersion, mappings)
+            links.forEach { (otherNode, extraMappings) ->
+                if (visited.add(otherNode)) {
+                    graphNode.links.add(Pair(otherNode.breadthFirstSearch(), extraMappings))
+                }
+            }
+            return graphNode
+        }
+        return first.breadthFirstSearch()
+    }
 
     override fun addNode(project: String, mcVersion: Int, mappings: String, extraMappings: File?, invertMappings: Boolean): ProjectGraphNode {
         check(rootNode == null) { "Only one root node may be set." }
         check(extraMappings == null) { "Cannot add extra mappings to root node." }
         return ProjectGraphNode(project, mcVersion, mappings).also { rootNode = it }
+    }
+}
+
+class Node(
+    val project: String,
+    val mcVersion: Int,
+    val mappings: String,
+) {
+    internal val links = mutableMapOf<Node, Pair<File?, Boolean>>()
+
+    fun link(other: Node, extraMappings: File? = null) {
+        this.links[other] = Pair(extraMappings, false)
+        other.links[this] = Pair(extraMappings, true)
     }
 }
 
