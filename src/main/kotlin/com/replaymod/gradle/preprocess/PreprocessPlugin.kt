@@ -1,19 +1,24 @@
 package com.replaymod.gradle.preprocess
 
 import net.fabricmc.mapping.tree.TinyMappingFactory
+import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.compile.AbstractCompile
 
 import org.gradle.kotlin.dsl.*
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.util.stream.Collectors
 
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -232,7 +237,7 @@ private fun Task.bakeNamedToIntermediaryMappings(mappings: Mappings, destination
             val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
             TinyReader(tiny, "named", "intermediary").read()
         } else {
-            MappingFormats.byId(mappings.format).read(mappings.file.toPath())
+            readMappings(mappings.format, mappings.file.toPath())
         }
         MappingFormats.SRG.write(mapping, destination.toPath())
     }
@@ -250,11 +255,30 @@ private fun Task.bakeNamedToOfficialMappings(mappings: Mappings, namedToIntermed
             TinyReader(tiny, "named", "official").read()
         } else {
             val iMappings = namedToIntermediaryMappings!!
-            val iMapSet = MappingFormats.byId(iMappings.format).read(iMappings.file.toPath())
-            val oMapSet = MappingFormats.byId(mappings.format).read(mappings.file.toPath())
+            val iMapSet = readMappings(iMappings.format, iMappings.file.toPath())
+            val oMapSet = readMappings(mappings.format, mappings.file.toPath())
             oMapSet.join(iMapSet.reverse()).reverse()
         }
         MappingFormats.SRG.write(mapping, destination.toPath())
+    }
+}
+
+private fun readMappings(format: String, path: Path): MappingSet {
+    // special handling for TSRG2
+    return if (format == "tsrg2") {
+        // remove lines starting with "tsrg2" (header) and \t\t (method parameter / static indicator)
+        val modifiedTSRG2 = path.toFile().readLines(StandardCharsets.UTF_8).stream().filter {
+            !it.startsWith("tsrg2") && !it.startsWith("\t\t")
+        }.collect(Collectors.joining("\n"))
+
+        val inputStream = ByteArrayInputStream(modifiedTSRG2.toByteArray(StandardCharsets.UTF_8))
+
+        // Proceed as the file would be normal TSRG:
+        // This is fine because the the output of createMcpToSrg specifically only contains two names: `left` and `right`.
+        // The other TSRG2 features, static indicators and parameter names, are irrelevant to our purpose and thus can be safely omitted as well.
+        MappingFormats.byId("tsrg").createReader(inputStream).read()
+    } else {
+        MappingFormats.byId(format).read(path)
     }
 }
 
@@ -263,8 +287,14 @@ private val Project.intermediaryMappings: Mappings?
         project.tasks.findByName("genSrgs")?.let { // FG2
             return Mappings("searge", it.property("mcpToSrg") as File, "srg", listOf(it))
         }
-        project.tasks.findByName("createMcpToSrg")?.let { // FG3
-            return Mappings("searge", it.property("output") as File, "tsrg", listOf(it))
+        project.tasks.findByName("createMcpToSrg")?.let { // FG3-5
+            val output = it.property("output")
+            // FG3+4 returns a File, FG5 a RegularFileProperty
+            return if (output is File) {
+                Mappings("searge", output, "tsrg", listOf(it))
+            } else {
+                Mappings("searge", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
+            }
         }
         tinyMappings?.let { return Mappings("yarn", it, "tiny", emptyList()) }
         return null
@@ -274,8 +304,14 @@ data class Mappings(val type: String, val file: File, val format: String, val ta
 
 private val Project.notchMappings: Mappings?
     get() {
-        project.tasks.findByName("extractSrg")?.let { // FG3
-            return Mappings("notch", it.property("output") as File, "tsrg", listOf(it))
+        project.tasks.findByName("extractSrg")?.let { // FG3-5
+            val output = it.property("output")
+            // FG3+4 returns a File, FG5 a RegularFileProperty
+            return if (output is File) {
+                Mappings("notch", output, "tsrg", listOf(it))
+            } else {
+                Mappings("notch", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
+            }
         }
         tinyMappings?.let { return Mappings("notch", it, "tiny", emptyList()) }
         return null
