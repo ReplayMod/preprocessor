@@ -319,7 +319,7 @@ private val Project.notchMappings: Mappings?
 
 private val Project.tinyMappings: File?
     get() {
-        val extension = extensions.findByName("minecraft") ?: return null
+        val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft") ?: return null
         if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
         val mappingsProvider = extension.withGroovyBuilder { getProperty("mappingsProvider") }
         mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
