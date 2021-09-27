@@ -323,7 +323,12 @@ private val Project.tinyMappings: File?
         if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
         val mappingsProvider = extension.withGroovyBuilder { getProperty("mappingsProvider") }
         mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
-        mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.let { return it as File } // loom 0.2.6
+        mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.also {
+            when (it) {
+                is File -> return it // loom 0.2.6
+                is Path -> return it.toFile() // loom 0.10.17
+            }
+        }
         throw GradleException("loom version not supported by preprocess plugin")
     }
 
