@@ -65,15 +65,13 @@ class PreprocessPlugin : Plugin<Project> {
                 val overwritesKotlin = project.file("src/$name/kotlin").also { it.mkdirs() }
                 val overwritesJava = project.file("src/$name/java").also { it.mkdirs() }
                 val overwriteResources = project.file("src/$name/resources").also { it.mkdirs() }
-                val preprocessedKotlin = File(project.buildDir, "preprocessed/$name/kotlin")
-                val preprocessedJava = File(project.buildDir, "preprocessed/$name/java")
-                val preprocessedResources = File(project.buildDir, "preprocessed/$name/resources")
+                val preprocessedRoot = project.buildDir.resolve("preprocessed/$name")
 
                 val preprocessJava = project.tasks.register<PreprocessTask>("preprocess${cName}Java") {
                     inherited.tasks.findByPath("preprocess${cName}Java")?.let { dependsOn(it) }
                     source = inherited.files(inheritedSourceSet.java.srcDirs)
                     overwrites = overwritesJava
-                    generated = preprocessedJava
+                    generated = preprocessedRoot.resolve("java")
                     compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
                     if (kotlin) {
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
@@ -86,14 +84,17 @@ class PreprocessPlugin : Plugin<Project> {
                 }
                 val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessJava)
-                java.setSrcDirs(listOf(overwritesJava, preprocessedJava))
+                java.setSrcDirs(listOf(overwritesJava, preprocessJava.map { it.generated!! }))
 
                 if (kotlin) {
                     val preprocessKotlin = project.tasks.register<PreprocessTask>("preprocess${cName}Kotlin") {
                         inherited.tasks.findByPath("preprocess${cName}Kotlin")?.let { dependsOn(it) }
-                        source = inherited.files(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.filter { it.endsWith("kotlin") })
+                        source =
+                            inherited.files(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.filter {
+                                it.endsWith("kotlin")
+                            })
                         overwrites = overwritesKotlin
-                        generated = preprocessedKotlin
+                        generated = preprocessedRoot.resolve("kotlin")
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                         mapping = mappingFile
                         reverseMapping = reverseMappings
@@ -106,20 +107,25 @@ class PreprocessPlugin : Plugin<Project> {
                     kotlinConsumerTask.dependsOn(preprocessKotlin)
                     kotlinConsumerTask.dependsOn(preprocessJava)
                     withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(
-                            listOf(overwritesKotlin, preprocessedKotlin, overwritesJava, preprocessedJava))
+                            listOf(
+                                overwritesKotlin,
+                                preprocessKotlin.map { it.generated!! },
+                                overwritesJava,
+                                preprocessJava.map { it.generated!! },
+                            ))
                 }
 
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
                     inherited.tasks.findByPath("preprocess${cName}Resources")?.let { dependsOn(it) }
                     source = inherited.files(inheritedSourceSet.resources.srcDirs)
                     overwrites = overwriteResources
-                    generated = preprocessedResources
+                    generated = preprocessedRoot.resolve("resources")
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
                 }
                 project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
-                resources.setSrcDirs(listOf(overwriteResources, preprocessedResources))
+                resources.setSrcDirs(listOf(overwriteResources, preprocessResources.map { it.generated!! }))
             }
 
             project.afterEvaluate {
