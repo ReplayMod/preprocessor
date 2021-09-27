@@ -31,6 +31,10 @@ gradlePlugin {
             id = "com.replaymod.preprocess"
             implementationClass = "com.replaymod.gradle.preprocess.PreprocessPlugin"
         }
+        register("preprocess-root") {
+            id = "com.replaymod.preprocess-root"
+            implementationClass = "com.replaymod.gradle.preprocess.RootPreprocessPlugin"
+        }
     }
 }
 

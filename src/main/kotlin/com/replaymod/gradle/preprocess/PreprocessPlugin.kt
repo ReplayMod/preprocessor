@@ -24,7 +24,7 @@ class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val parent = project.parent
         if (parent == null) {
-            project.extensions.create("preprocess", RootPreprocessExtension::class)
+            project.apply<RootPreprocessPlugin>()
             return
         }
 
