@@ -87,7 +87,7 @@ fun <T : ClassMapping<T, *>> ClassMapping<T, *>.mergeBoth(b: ClassMapping<T, *>,
     innerClassMappings.forEach { aClass ->
         val bClass = b.getInnerClassMapping(aClass.deobfuscatedName).orElse(null)
         if (bClass != null) {
-            val mergedInner = merged.getOrCreateInnerClassMapping(obfuscatedName)
+            val mergedInner = merged.getOrCreateInnerClassMapping(aClass.obfuscatedName)
             mergedInner.deobfuscatedName = bClass.deobfuscatedName
             aClass.mergeBoth(bClass, mergedInner)
         } else {
