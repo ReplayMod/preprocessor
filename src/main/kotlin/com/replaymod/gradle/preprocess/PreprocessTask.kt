@@ -116,7 +116,7 @@ open class PreprocessTask : DefaultTask() {
 
     fun compileTask(task: AbstractCompile) {
         dependsOn(task)
-        classpath = task.classpath + project.files(task.destinationDir)
+        classpath = (classpath ?: project.files()) + task.classpath + project.files(task.destinationDir)
     }
 
     @TaskAction

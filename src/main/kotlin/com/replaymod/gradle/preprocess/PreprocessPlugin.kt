@@ -95,6 +95,7 @@ class PreprocessPlugin : Plugin<Project> {
                             })
                         overwrites = overwritesKotlin
                         generated = preprocessedRoot.resolve("kotlin")
+                        compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                         mapping = mappingFile
                         reverseMapping = reverseMappings
