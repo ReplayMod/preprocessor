@@ -76,6 +76,7 @@ class PreprocessPlugin : Plugin<Project> {
                     if (kotlin) {
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                     }
+                    remappedClasspath = (project.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"] as AbstractCompile).classpath
                     mapping = mappingFile
                     reverseMapping = reverseMappings
                     vars.convention(ext.vars)
@@ -97,6 +98,7 @@ class PreprocessPlugin : Plugin<Project> {
                         generated = preprocessedRoot.resolve("kotlin")
                         compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
                         compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
+                        remappedClasspath = (project.tasks["compile${cName}Kotlin"] as AbstractCompile).classpath
                         mapping = mappingFile
                         reverseMapping = reverseMappings
                         vars.convention(ext.vars)

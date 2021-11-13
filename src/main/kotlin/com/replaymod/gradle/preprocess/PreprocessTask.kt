@@ -96,6 +96,10 @@ open class PreprocessTask : DefaultTask() {
     @Optional
     var classpath: FileCollection? = null
 
+    @InputFiles
+    @Optional
+    var remappedClasspath: FileCollection? = null
+
     @Input
     val vars = project.objects.mapProperty<String, Int>()
 
@@ -162,6 +166,15 @@ open class PreprocessTask : DefaultTask() {
                     null
                 }
             }.toTypedArray()
+            LOGGER.debug("Remapped Classpath:")
+            javaTransformer.remappedClasspath = remappedClasspath?.files?.mapNotNull {
+                if (it.exists()) {
+                    it.absolutePath.also(LOGGER::debug)
+                } else {
+                    LOGGER.debug("$it (file does not exist)")
+                    null
+                }
+            }?.toTypedArray()
             val sources = mutableMapOf<String, String>()
             val processedSources = mutableMapOf<String, String>()
             source.flatMap { base -> project.fileTree(base).map { Pair(base, it) } }.forEach { (base, file) ->
