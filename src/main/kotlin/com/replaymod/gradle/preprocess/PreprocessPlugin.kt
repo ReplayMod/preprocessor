@@ -244,7 +244,7 @@ private fun Task.bakeNamedToIntermediaryMappings(mappings: Mappings, destination
     doLast {
         val mapping = if (mappings.format == "tiny") {
             val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
-            TinyReader(tiny, "named", "intermediary").read()
+            TinyReader(tiny, "named", if (mappings.type == "searge") "srg" else "intermediary").read()
         } else {
             readMappings(mappings.format, mappings.file.toPath())
         }
@@ -305,6 +305,12 @@ private val Project.intermediaryMappings: Mappings?
                 Mappings("searge", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
             }
         }
+        mappingsProvider?.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
+            val file = (it as Path).toFile()
+            if (file.exists()) {
+                return Mappings("searge", file, "tiny", emptyList())
+            }
+        }
         tinyMappings?.let { return Mappings("yarn", it, "tiny", emptyList()) }
         return null
     }
@@ -326,11 +332,16 @@ private val Project.notchMappings: Mappings?
         return null
     }
 
-private val Project.tinyMappings: File?
+private val Project.mappingsProvider: Any?
     get() {
         val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft") ?: return null
         if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
-        val mappingsProvider = extension.withGroovyBuilder { getProperty("mappingsProvider") }
+        return extension.withGroovyBuilder { getProperty("mappingsProvider") }
+    }
+
+private val Project.tinyMappings: File?
+    get() {
+        val mappingsProvider = mappingsProvider ?: return null
         mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
         mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.also {
             when (it) {
