@@ -164,6 +164,8 @@ open class PreprocessTask : DefaultTask() {
         entries.add(InOut(source, generated, overwrites))
     }
 
+    @Deprecated("Unnecessarily depends on the task output. Instead set `classpath` directly.",
+        replaceWith = ReplaceWith(expression = "classpath = task.classpath"))
     fun compileTask(task: AbstractCompile) {
         dependsOn(task)
         classpath = (classpath ?: project.files()) + task.classpath + project.files(task.destinationDir)

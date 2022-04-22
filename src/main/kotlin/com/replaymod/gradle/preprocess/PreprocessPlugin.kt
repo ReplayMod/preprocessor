@@ -77,7 +77,6 @@ class PreprocessPlugin : Plugin<Project> {
                         overwrites = overwritesJava,
                         generated = generatedJava,
                     )
-                    compileTask(inherited.tasks["compile${cName}Java"] as AbstractCompile)
                     if (kotlin) {
                         entry(
                             source = inherited.files(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.filter {
@@ -86,8 +85,8 @@ class PreprocessPlugin : Plugin<Project> {
                             overwrites = overwritesKotlin,
                             generated = generatedKotlin,
                         )
-                        compileTask(inherited.tasks["compile${cName}Kotlin"] as AbstractCompile)
                     }
+                    classpath = (inherited.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"] as AbstractCompile).classpath
                     remappedClasspath = (project.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"] as AbstractCompile).classpath
                     mapping = mappingFile
                     reverseMapping = reverseMappings
