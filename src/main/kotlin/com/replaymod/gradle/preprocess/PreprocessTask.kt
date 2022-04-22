@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.Serializable
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.regex.Pattern
 
 data class Keywords(
@@ -61,21 +62,56 @@ open class PreprocessTask : DefaultTask() {
         private val LOGGER = LoggerFactory.getLogger(PreprocessTask::class.java)
     }
 
-    @OutputDirectory
-    var generated: File? = null
+    data class InOut(
+        val source: FileCollection,
+        val generated: File,
+        val overwrites: File?,
+    )
 
     @Internal
-    var source: FileCollection? = null
+    var entries: MutableList<InOut> = mutableListOf()
 
     @InputFiles
     @SkipWhenEmpty
-    fun getSourceFileTrees(): List<ConfigurableFileTree>? {
-        return source?.map { project.fileTree(it) }
+    fun getSourceFileTrees(): List<ConfigurableFileTree> {
+        return entries.flatMap { it.source }.map { project.fileTree(it) }
     }
 
-    @InputDirectory
+    @InputFiles
     @Optional
-    var overwrites: File? = null
+    fun getOverwritesFileTrees(): List<ConfigurableFileTree> {
+        return entries.mapNotNull { it.overwrites?.let(project::fileTree) }
+    }
+
+    @OutputDirectories
+    fun getGeneratedDirectories(): List<File> {
+        return entries.map { it.generated }
+    }
+
+    private fun updateFirstInOut(update: InOut.() -> InOut) {
+        val first = entries.removeFirstOrNull()
+            ?: InOut(project.files(), File("invalid"), null)
+        first.update()
+        entries.add(0, first)
+    }
+
+    @Deprecated("Instead add an entry to `entries`.")
+    @get:Internal
+    var generated: File?
+        get() = entries.firstOrNull()?.generated
+        set(value) = updateFirstInOut { copy(generated = value ?: File("invalid")) }
+
+    @Deprecated("Instead add an entry to `entries`.")
+    @get:Internal
+    var source: FileCollection?
+        get() = entries.firstOrNull()?.source
+        set(value) = updateFirstInOut { copy(source = value ?: project.files()) }
+
+    @Deprecated("Instead add an entry to `entries`.")
+    @get:Internal
+    var overwrites: File?
+        get() = entries.firstOrNull()?.overwrites
+        set(value) = updateFirstInOut { copy(overwrites = value) }
 
     @InputFile
     @Optional
@@ -110,12 +146,22 @@ open class PreprocessTask : DefaultTask() {
     @Optional
     val patternAnnotation = project.objects.property<String>()
 
+    @Deprecated("Instead add an entry to `entries`.",
+        replaceWith = ReplaceWith(expression = "entry(project.file(file), generated, overwrites)"))
     fun source(file: Any) {
+        @Suppress("DEPRECATION")
         source = project.files(file)
     }
 
+    @Deprecated("Instead add an entry to `entries`.",
+        replaceWith = ReplaceWith(expression = "entry(source, project.file(file), overwrites)"))
     fun generated(file: Any) {
+        @Suppress("DEPRECATION")
         generated = project.file(file)
+    }
+
+    fun entry(source: FileCollection, generated: File, overwrites: File) {
+        entries.add(InOut(source, generated, overwrites))
     }
 
     fun compileTask(task: AbstractCompile) {
@@ -125,9 +171,19 @@ open class PreprocessTask : DefaultTask() {
 
     @TaskAction
     fun preprocess() {
-        val source = source!!
-        val outPath = generated!!.toPath()
-        val overwritesPath = overwrites?.toPath()
+        data class Entry(val relPath: String, val inBase: Path, val outBase: Path, val overwritesBase: Path?)
+        val sourceFiles: List<Entry> = entries.flatMap { inOut ->
+            val outBasePath = inOut.generated.toPath()
+            val overwritesBasePath = inOut.overwrites?.toPath()
+            inOut.source.flatMap { inBase ->
+                val inBasePath = inBase.toPath()
+                project.fileTree(inBase).map { file ->
+                    val relPath = inBasePath.relativize(file.toPath())
+                    Entry(relPath.toString(), inBasePath, outBasePath, overwritesBasePath)
+                }
+            }
+        }
+
         var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
 
         val mapping = mapping
@@ -177,24 +233,26 @@ open class PreprocessTask : DefaultTask() {
             }?.toTypedArray()
             val sources = mutableMapOf<String, String>()
             val processedSources = mutableMapOf<String, String>()
-            source.flatMap { base -> project.fileTree(base).map { Pair(base, it) } }.forEach { (base, file) ->
-                if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
-                    val relPath = base.toPath().relativize(file.toPath())
-                    val text = file.readText()
-                    sources[relPath.toString()] = text
+            sourceFiles.forEach { (relPath, inBase, _, _) ->
+                if (relPath.endsWith(".java") || relPath.endsWith(".kt")) {
+                    val text = String(Files.readAllBytes(inBase.resolve(relPath)))
+                    sources[relPath] = text
                     val lines = text.lines()
-                    val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
+                    val kws = keywords.get().entries.find { (ext, _) -> relPath.endsWith(ext) }
                     if (kws != null) {
-                        processedSources[relPath.toString()] = CommentPreprocessor(vars.get()).convertSource(
+                        processedSources[relPath] = CommentPreprocessor(vars.get()).convertSource(
                                 kws.value,
                                 lines,
                                 lines.map { Pair(it, emptyList()) },
-                                file.toString()
+                                relPath
                         ).joinToString("\n")
                     }
                 }
             }
-            overwritesPath?.let { base -> project.fileTree(base).map { Pair(base, it) } }?.forEach { (base, file) ->
+            val overwritesFiles = entries
+                .mapNotNull { it.overwrites }
+                .flatMap { base -> project.fileTree(base).map { Pair(base.toPath(), it) } }
+            overwritesFiles.forEach { (base, file) ->
                 if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
                     val relPath = base.relativize(file.toPath())
                     processedSources[relPath.toString()] = file.readText()
@@ -203,19 +261,19 @@ open class PreprocessTask : DefaultTask() {
             mappedSources = javaTransformer.remap(sources, processedSources)
         }
 
-        project.delete(outPath)
+        project.delete(entries.map { it.generated })
 
         val commentPreprocessor = CommentPreprocessor(vars.get())
-        source.flatMap { base -> project.fileTree(base).map { Pair(base, it) } }.forEach { (base, file) ->
-            val relPath = base.toPath().relativize(file.toPath())
-            val outFile = outPath.resolve(relPath).toFile()
+        sourceFiles.forEach { (relPath, inBase, outBase, overwritesPath) ->
+            val file = inBase.resolve(relPath).toFile()
+            val outFile = outBase.resolve(relPath).toFile()
             if (overwritesPath != null && Files.exists(overwritesPath.resolve(relPath))) {
                 return@forEach
             }
             val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
             if (kws != null) {
                 val javaTransform = { lines: List<String> ->
-                    mappedSources?.get(relPath.toString())?.let { (source, errors) ->
+                    mappedSources?.get(relPath)?.let { (source, errors) ->
                         val errorsByLine = mutableMapOf<Int, MutableList<String>>()
                         for ((line, error) in errors) {
                             errorsByLine.getOrPut(line, ::mutableListOf).add(error)
