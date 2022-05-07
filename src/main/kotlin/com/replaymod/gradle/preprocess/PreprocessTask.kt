@@ -40,8 +40,8 @@ open class PreprocessTask : DefaultTask() {
         val DEFAULT_KEYWORDS = Keywords(
                 disableRemap = "//#disable-remap",
                 enableRemap = "//#enable-remap",
-                `if` = "//#if ",
-                ifdef = "//#ifdef ",
+                `if` = "//#if",
+                ifdef = "//#ifdef",
                 elseif = "//#elseif",
                 `else` = "//#else",
                 endif = "//#endif",
@@ -51,8 +51,8 @@ open class PreprocessTask : DefaultTask() {
         val CFG_KEYWORDS = Keywords(
                 disableRemap = "##disable-remap",
                 enableRemap = "##enable-remap",
-                `if` = "##if ",
-                ifdef = "##ifdef ",
+                `if` = "##if",
+                ifdef = "##ifdef",
                 elseif = "##elseif",
                 `else` = "##else",
                 endif = "##endif",
@@ -338,10 +338,10 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                 "<=" -> lhs <= rhs
                 ">" -> lhs > rhs
                 "<" -> lhs < rhs
-                else -> throw IllegalArgumentException("Invalid expression: $this")
+                else -> throw InvalidExpressionException(this)
             }
         } else {
-            throw IllegalArgumentException("Invalid expression: $this")
+            throw InvalidExpressionException(this)
         }
     }
 
@@ -355,13 +355,23 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         var remapActive = true
         var n = 0
 
+        fun evalCondition(condition: String): Boolean {
+            if (!condition.startsWith(" "))
+                throw ParserException("Expected space before condition in line $n of $fileName")
+            try {
+                return condition.trim().evalExpr()
+            } catch (e: InvalidExpressionException) {
+                throw ParserException("Invalid expression \"${e.message}\" in line $n of $fileName")
+            }
+        }
+
         return lines.zip(remapped).map { (originalLine, lineMapped) ->
             val (line, errors) = lineMapped
             var ignoreErrors = false
             n++
             val trimmed = line.trim()
             val mapped = if (trimmed.startsWith(kws.`if`)) {
-                val result = trimmed.substring(kws.`if`.length).trim().evalExpr()
+                val result = evalCondition(trimmed.substring(kws.`if`.length))
                 stack.push(IfStackEntry(result, elseFound = false, trueFound = result))
                 indentStack.push(line.indentation)
                 active = active && result
@@ -382,7 +392,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                     stack.push(last.copy(currentValue = false))
                     false
                 } else {
-                    val result = trimmed.substring(kws.elseif.length).trim().evalExpr()
+                    val result = evalCondition(trimmed.substring(kws.elseif.length))
                     stack.pop()
                     stack.push(IfStackEntry(result, elseFound = false, trueFound = result))
                     stack.all { it.currentValue }
@@ -493,5 +503,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         var trueFound: Boolean = false
     )
 
-    class ParserException(str: String): RuntimeException(str)
+    class InvalidExpressionException(expr: String) : RuntimeException(expr)
+
+    class ParserException(str: String) : RuntimeException(str)
 }
