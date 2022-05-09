@@ -119,6 +119,14 @@ class PreprocessorTests : FunSpec({
                 shouldThrow<CommentPreprocessor.ParserException> { "//#if t".convert() }
                 shouldThrow<CommentPreprocessor.ParserException> { "//#if t\n//#if t\n//#endif".convert() }
             }
+            test("throws on missing space") {
+                shouldThrow<CommentPreprocessor.ParserException> { "//#ift\n//#endif".convert() }
+                shouldThrow<CommentPreprocessor.ParserException> { "//#if f\n//#elseift\n//#endif".convert() }
+            }
+            test("throws on empty if condition") {
+                shouldThrow<CommentPreprocessor.ParserException> { "//#if\n//#endif".convert() }
+                shouldThrow<CommentPreprocessor.ParserException> { "//#if f\n//#elseif\n//#endif".convert() }
+            }
             test("if t .. endif") {
                 """
                     //#if t
