@@ -93,6 +93,7 @@ class PreprocessPlugin : Plugin<Project> {
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
+                    manageImports.convention(ext.manageImports)
                 }
                 val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessCode)
@@ -121,6 +122,7 @@ class PreprocessPlugin : Plugin<Project> {
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
+                    manageImports.convention(ext.manageImports)
                 }
                 project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
                 resources.setSrcDirs(listOf(overwriteResources, preprocessResources.map { generatedResources }))

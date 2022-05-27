@@ -146,6 +146,10 @@ open class PreprocessTask : DefaultTask() {
     @Optional
     val patternAnnotation = project.objects.property<String>()
 
+    @Input
+    @Optional
+    val manageImports = project.objects.property<Boolean>()
+
     @Deprecated("Instead add an entry to `entries`.",
         replaceWith = ReplaceWith(expression = "entry(project.file(file), generated, overwrites)"))
     fun source(file: Any) {
@@ -215,6 +219,7 @@ open class PreprocessTask : DefaultTask() {
             })
             val javaTransformer = Transformer(mappings)
             javaTransformer.patternAnnotation = patternAnnotation.orNull
+            javaTransformer.manageImports = manageImports.getOrElse(false)
             LOGGER.debug("Remap Classpath:")
             javaTransformer.classpath = classpath.files.mapNotNull {
                 if (it.exists()) {
