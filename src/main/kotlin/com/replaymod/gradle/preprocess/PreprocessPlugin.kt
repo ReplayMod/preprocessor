@@ -354,7 +354,7 @@ private val Task.classpath: FileCollection?
         // assume kotlin 1.7+
         try {
             val classpathMethod = this.javaClass.getMethod("getLibraries")
-            classpathMethod.invoke(this) as? FileCollection
+            classpathMethod.invoke(this) as FileCollection?
         } catch (ex: Exception) {
             throw RuntimeException(ex)
         }
