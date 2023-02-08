@@ -331,7 +331,13 @@ private val Project.mappingsProvider: Any?
     get() {
         val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft") ?: return null
         if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
-        return extension.withGroovyBuilder { getProperty("mappingsProvider") }
+        listOf(
+            "mappingConfiguration", // Fabric Loom 1.1+
+            "mappingsProvider", // Fabric Loom pre 1.1
+        ).forEach { pro ->
+            extension.maybeGetGroovyProperty(pro)?.also { return it }
+        }
+        return null
     }
 
 private val Project.tinyMappings: File?
