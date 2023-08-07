@@ -3,6 +3,7 @@ package com.replaymod.gradle.preprocess
 import net.fabricmc.mapping.tree.TinyMappingFactory
 import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
+import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -10,8 +11,8 @@ import org.gradle.api.Task
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.SourceDirectorySet
-import org.gradle.api.tasks.Copy
-import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
 import org.gradle.api.tasks.compile.JavaCompile
 
@@ -134,31 +135,34 @@ class PreprocessPlugin : Plugin<Project> {
 
             project.afterEvaluate {
                 val prepareTaskName = "prepareMappingsForPreprocessor"
+                val prepareSourceTaskName = "prepareSourceMappingsForPreprocessor"
+                val prepareDestTaskName = "prepareDestMappingsForPreprocessor"
                 val projectIntermediaryMappings = project.intermediaryMappings
                 val inheritedIntermediaryMappings = inherited.intermediaryMappings
                 val projectNotchMappings = project.notchMappings
                 val inheritedNotchMappings = inherited.notchMappings
                 val sourceSrg = project.buildDir.resolve(prepareTaskName).resolve("source.srg")
                 val destinationSrg = project.buildDir.resolve(prepareTaskName).resolve("destination.srg")
-                val prepareTask = if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null
+                val (prepareSourceTask, prepareDestTask) = if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null
                         && inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
-                    tasks.register(prepareTaskName) {
-                        bakeNamedToIntermediaryMappings(inheritedIntermediaryMappings, sourceSrg)
-                        bakeNamedToIntermediaryMappings(projectIntermediaryMappings, destinationSrg)
-                    }
+                    Pair(
+                        bakeNamedToIntermediaryMappings(prepareSourceTaskName, inheritedIntermediaryMappings, sourceSrg),
+                        bakeNamedToIntermediaryMappings(prepareDestTaskName, projectIntermediaryMappings, destinationSrg),
+                    )
                 } else if (inheritedNotchMappings != null && projectNotchMappings != null
                         && inheritedNode.mcVersion == projectNode.mcVersion) {
-                    tasks.register(prepareTaskName) {
-                        bakeNamedToOfficialMappings(inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg)
-                        bakeNamedToOfficialMappings(projectNotchMappings, projectIntermediaryMappings, destinationSrg)
-                    }
+                    Pair(
+                        bakeNamedToOfficialMappings(prepareSourceTaskName, inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg),
+                        bakeNamedToOfficialMappings(prepareDestTaskName, projectNotchMappings, projectIntermediaryMappings, destinationSrg),
+                    )
                 } else {
                     throw IllegalStateException("Failed to find mappings from $inherited to $project.")
                 }
                 tasks.withType<PreprocessTask>().configureEach {
                     sourceMappings = sourceSrg
                     destinationMappings = destinationSrg
-                    dependsOn(prepareTask)
+                    dependsOn(prepareSourceTask)
+                    dependsOn(prepareDestTask)
                 }
             }
 
@@ -235,39 +239,85 @@ class PreprocessPlugin : Plugin<Project> {
     }
 }
 
-private fun Task.bakeNamedToIntermediaryMappings(mappings: Mappings, destination: File) {
-    mappings.tasks.forEach { this.dependsOn(it) }
-    inputs.file(mappings.file)
-    outputs.file(destination)
-    doLast {
+internal class MappingsFile(
+    @Input
+    val type: String,
+    @Input
+    val format: String,
+    @InputFile
+    @PathSensitive(PathSensitivity.NONE)
+    val file: File,
+)
+private fun Mappings.toFile() = MappingsFile(type, format, file)
+
+@CacheableTask
+internal abstract class BakeNamedToIntermediaryMappings : DefaultTask() {
+    @get:Nested
+    abstract val mappings: Property<MappingsFile>
+
+    @get:OutputFile
+    abstract val output: RegularFileProperty
+
+    @TaskAction
+    fun prepare() {
+        val mappings = mappings.get()
         val mapping = if (mappings.format == "tiny") {
             val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
             TinyReader(tiny, "named", if (mappings.type == "searge") "srg" else "intermediary").read()
         } else {
             readMappings(mappings.format, mappings.file.toPath())
         }
-        MappingFormats.SRG.write(mapping, destination.toPath())
+        MappingFormats.SRG.write(mapping, output.get().asFile.toPath())
     }
 }
 
-private fun Task.bakeNamedToOfficialMappings(mappings: Mappings, namedToIntermediaryMappings: Mappings?, destination: File) {
-    mappings.tasks.forEach { this.dependsOn(it) }
-    namedToIntermediaryMappings?.tasks?.forEach { dependsOn(it) }
-    inputs.file(mappings.file)
-    namedToIntermediaryMappings?.let { inputs.file(it.file) }
-    outputs.file(destination)
-    doLast {
+@CacheableTask
+internal abstract class BakeNamedToOfficialMappings : DefaultTask() {
+    @get:Nested
+    abstract val mappings: Property<MappingsFile>
+
+    @get:Nested
+    @get:Optional
+    abstract val namedToIntermediaryMappings: Property<MappingsFile?>
+
+    @get:OutputFile
+    abstract val output: RegularFileProperty
+
+    @TaskAction
+    fun prepare() {
+        val mappings = mappings.get()
         val mapping = if (mappings.format == "tiny") {
             val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
             TinyReader(tiny, "named", "official").read()
         } else {
-            val iMappings = namedToIntermediaryMappings!!
+            val iMappings = namedToIntermediaryMappings.get()
             val iMapSet = readMappings(iMappings.format, iMappings.file.toPath())
             val oMapSet = readMappings(mappings.format, mappings.file.toPath())
             oMapSet.join(iMapSet.reverse()).reverse()
         }
-        MappingFormats.SRG.write(mapping, destination.toPath())
+        MappingFormats.SRG.write(mapping, output.get().asFile.toPath())
     }
+}
+
+private fun Project.bakeNamedToIntermediaryMappings(name: String, namedToIntermediaryMappings: Mappings, destination: File): TaskProvider<BakeNamedToIntermediaryMappings> {
+    val task = tasks.register(name, BakeNamedToIntermediaryMappings::class)
+    task.configure {
+        dependsOn(namedToIntermediaryMappings.tasks)
+        mappings.set(namedToIntermediaryMappings.toFile())
+        output.set(destination)
+    }
+    return task
+}
+
+private fun Project.bakeNamedToOfficialMappings(name: String, mappings: Mappings, namedToIntermediaryMappings: Mappings?, destination: File): TaskProvider<BakeNamedToOfficialMappings> {
+    val task = tasks.register(name, BakeNamedToOfficialMappings::class)
+    task.configure {
+        dependsOn(mappings.tasks, namedToIntermediaryMappings?.tasks)
+        this.mappings.set(mappings.toFile())
+        this.namedToIntermediaryMappings.set(namedToIntermediaryMappings?.toFile())
+        output.set(destination)
+    }
+    return task
 }
 
 private fun readMappings(format: String, path: Path): MappingSet {
