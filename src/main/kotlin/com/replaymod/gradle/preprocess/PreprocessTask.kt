@@ -7,8 +7,11 @@ import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.file.ConfigurableFileTree
 import org.gradle.api.file.FileCollection
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.file.FileTree
+import org.gradle.api.file.ProjectLayout
+import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
 import org.gradle.kotlin.dsl.mapProperty
@@ -22,42 +25,48 @@ import java.io.Serializable
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.regex.Pattern
+import javax.inject.Inject
 
 data class Keywords(
-        val disableRemap: String,
-        val enableRemap: String,
-        val `if`: String,
-        val ifdef: String,
-        val elseif: String,
-        val `else`: String,
-        val endif: String,
-        val eval: String
+    val disableRemap: String,
+    val enableRemap: String,
+    val `if`: String,
+    val ifdef: String,
+    val elseif: String,
+    val `else`: String,
+    val endif: String,
+    val eval: String
 ) : Serializable
 
 @CacheableTask
-open class PreprocessTask : DefaultTask() {
+open class PreprocessTask @Inject constructor(
+    private val layout: ProjectLayout,
+    private val fsops: FileSystemOperations,
+    objects: ObjectFactory
+) : DefaultTask() {
     companion object {
         @JvmStatic
         val DEFAULT_KEYWORDS = Keywords(
-                disableRemap = "//#disable-remap",
-                enableRemap = "//#enable-remap",
-                `if` = "//#if",
-                ifdef = "//#ifdef",
-                elseif = "//#elseif",
-                `else` = "//#else",
-                endif = "//#endif",
-                eval = "//$$"
+            disableRemap = "//#disable-remap",
+            enableRemap = "//#enable-remap",
+            `if` = "//#if",
+            ifdef = "//#ifdef",
+            elseif = "//#elseif",
+            `else` = "//#else",
+            endif = "//#endif",
+            eval = "//$$"
         )
+
         @JvmStatic
         val CFG_KEYWORDS = Keywords(
-                disableRemap = "##disable-remap",
-                enableRemap = "##enable-remap",
-                `if` = "##if",
-                ifdef = "##ifdef",
-                elseif = "##elseif",
-                `else` = "##else",
-                endif = "##endif",
-                eval = "#$$"
+            disableRemap = "##disable-remap",
+            enableRemap = "##enable-remap",
+            `if` = "##if",
+            ifdef = "##ifdef",
+            elseif = "##elseif",
+            `else` = "##else",
+            endif = "##endif",
+            eval = "#$$"
         )
 
         private val LOGGER = LoggerFactory.getLogger(PreprocessTask::class.java)
@@ -75,15 +84,15 @@ open class PreprocessTask : DefaultTask() {
     @InputFiles
     @SkipWhenEmpty
     @PathSensitive(PathSensitivity.RELATIVE)
-    fun getSourceFileTrees(): List<ConfigurableFileTree> {
-        return entries.flatMap { it.source }.map { project.fileTree(it) }
+    fun getSourceFileTrees(): List<FileTree> {
+        return entries.flatMap { it.source }.map { layout.files(it).asFileTree }
     }
 
     @InputFiles
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
-    fun getOverwritesFileTrees(): List<ConfigurableFileTree> {
-        return entries.mapNotNull { it.overwrites?.let(project::fileTree) }
+    fun getOverwritesFileTrees(): List<FileTree> {
+        return entries.mapNotNull { it.overwrites?.let { layout.files(it).asFileTree } }
     }
 
     @OutputDirectories
@@ -93,7 +102,7 @@ open class PreprocessTask : DefaultTask() {
 
     private fun updateFirstInOut(update: InOut.() -> InOut) {
         val first = entries.removeFirstOrNull()
-            ?: InOut(project.files(), File("invalid"), null)
+            ?: InOut(layout.files(), File("invalid"), null)
         first.update()
         entries.add(0, first)
     }
@@ -108,7 +117,7 @@ open class PreprocessTask : DefaultTask() {
     @get:Internal
     var source: FileCollection?
         get() = entries.firstOrNull()?.source
-        set(value) = updateFirstInOut { copy(source = value ?: project.files()) }
+        set(value) = updateFirstInOut { copy(source = value ?: layout.files()) }
 
     @Deprecated("Instead add an entry to `entries`.")
     @get:Internal
@@ -137,12 +146,12 @@ open class PreprocessTask : DefaultTask() {
     @InputDirectory
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
-    val jdkHome = project.objects.directoryProperty()
+    val jdkHome = objects.directoryProperty()
 
     @InputDirectory
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
-    val remappedjdkHome = project.objects.directoryProperty()
+    val remappedjdkHome = objects.directoryProperty()
 
     @InputFiles
     @Optional
@@ -155,53 +164,60 @@ open class PreprocessTask : DefaultTask() {
     var remappedClasspath: FileCollection? = null
 
     @Input
-    val vars = project.objects.mapProperty<String, Int>()
+    val vars = objects.mapProperty<String, Int>()
 
     @Input
-    val keywords = project.objects.mapProperty<String, Keywords>()
-
-    @Input
-    @Optional
-    val patternAnnotation = project.objects.property<String>()
+    val keywords = objects.mapProperty<String, Keywords>()
 
     @Input
     @Optional
-    val manageImports = project.objects.property<Boolean>()
+    val patternAnnotation = objects.property<String>()
 
-    @Deprecated("Instead add an entry to `entries`.",
-        replaceWith = ReplaceWith(expression = "entry(project.file(file), generated, overwrites)"))
+    @Input
+    @Optional
+    val manageImports = objects.property<Boolean>()
+
+    @Deprecated(
+        "Instead add an entry to `entries`.",
+        replaceWith = ReplaceWith(expression = "entry(project.file(file), generated, overwrites)")
+    )
     fun source(file: Any) {
         @Suppress("DEPRECATION")
-        source = project.files(file)
+        source = layout.files(file)
     }
 
-    @Deprecated("Instead add an entry to `entries`.",
-        replaceWith = ReplaceWith(expression = "entry(source, project.file(file), overwrites)"))
+    @Deprecated(
+        "Instead add an entry to `entries`.",
+        replaceWith = ReplaceWith(expression = "entry(source, project.file(file), overwrites)")
+    )
     fun generated(file: Any) {
         @Suppress("DEPRECATION")
-        generated = project.file(file)
+        generated = layout.files(file).singleFile
     }
 
     fun entry(source: FileCollection, generated: File, overwrites: File) {
         entries.add(InOut(source, generated, overwrites))
     }
 
-    @Deprecated("Unnecessarily depends on the task output. Instead set `classpath` directly.",
-        replaceWith = ReplaceWith(expression = "classpath = task.classpath"))
+    @Deprecated(
+        "Unnecessarily depends on the task output. Instead set `classpath` directly.",
+        replaceWith = ReplaceWith(expression = "classpath = task.classpath")
+    )
     fun compileTask(task: AbstractCompile) {
         dependsOn(task)
-        classpath = (classpath ?: project.files()) + task.classpath + project.files(task.destinationDir)
+        classpath = (classpath ?: layout.files()) + task.classpath + layout.files(task.destinationDirectory)
     }
 
     @TaskAction
     fun preprocess() {
         data class Entry(val relPath: String, val inBase: Path, val outBase: Path, val overwritesBase: Path?)
+
         val sourceFiles: List<Entry> = entries.flatMap { inOut ->
             val outBasePath = inOut.generated.toPath()
             val overwritesBasePath = inOut.overwrites?.toPath()
             inOut.source.flatMap { inBase ->
                 val inBasePath = inBase.toPath()
-                project.fileTree(inBase).map { file ->
+                layout.files(inBase).asFileTree.map { file ->
                     val relPath = inBasePath.relativize(file.toPath())
                     Entry(relPath.toString(), inBasePath, outBasePath, overwritesBasePath)
                 }
@@ -220,10 +236,11 @@ open class PreprocessTask : DefaultTask() {
                     val srcMap = sourceMappings!!.readMappings()
                     val dstMap = destinationMappings!!.readMappings()
                     legacyMap.mergeBoth(
-                            // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
-                            // dstMap and would otherwise be filtered by the join)
-                            srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
-                            MappingSet.create(LegacyMappingSetModelFactory()))
+                        // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
+                        // dstMap and would otherwise be filtered by the join)
+                        srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
+                        MappingSet.create(LegacyMappingSetModelFactory())
+                    )
                 } else {
                     LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
                 }
@@ -232,7 +249,8 @@ open class PreprocessTask : DefaultTask() {
                 val dstMap = destinationMappings!!.readMappings()
                 srcMap.join(dstMap.reverse())
             }
-            MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath().also {
+
+            MappingFormats.SRG.write(mappings, layout.buildDirectory.asFile.get().resolve(name).resolve("mapping.srg").toPath().also {
                 Files.createDirectories(it.parent)
             })
             val javaTransformer = Transformer(mappings)
@@ -245,7 +263,7 @@ open class PreprocessTask : DefaultTask() {
                 if (it.exists()) {
                     it.absolutePath.also(LOGGER::debug)
                 } else {
-                    LOGGER.debug("$it (file does not exist)")
+                    LOGGER.debug("{} (file does not exist)", it)
                     null
                 }
             }.toTypedArray()
@@ -254,7 +272,7 @@ open class PreprocessTask : DefaultTask() {
                 if (it.exists()) {
                     it.absolutePath.also(LOGGER::debug)
                 } else {
-                    LOGGER.debug("$it (file does not exist)")
+                    LOGGER.debug("{} (file does not exist)", it)
                     null
                 }
             }?.toTypedArray()
@@ -268,17 +286,17 @@ open class PreprocessTask : DefaultTask() {
                     val kws = keywords.get().entries.find { (ext, _) -> relPath.endsWith(ext) }
                     if (kws != null) {
                         processedSources[relPath] = CommentPreprocessor(vars.get()).convertSource(
-                                kws.value,
-                                lines,
-                                lines.map { Pair(it, emptyList()) },
-                                relPath
+                            kws.value,
+                            lines,
+                            lines.map { Pair(it, emptyList()) },
+                            relPath
                         ).joinToString("\n")
                     }
                 }
             }
             val overwritesFiles = entries
                 .mapNotNull { it.overwrites }
-                .flatMap { base -> project.fileTree(base).map { Pair(base.toPath(), it) } }
+                .flatMap { base -> layout.files(base).asFileTree.map { Pair(base.toPath(), it) } }
             overwritesFiles.forEach { (base, file) ->
                 if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
                     val relPath = base.relativize(file.toPath())
@@ -288,7 +306,9 @@ open class PreprocessTask : DefaultTask() {
             mappedSources = javaTransformer.remap(sources, processedSources)
         }
 
-        project.delete(entries.map { it.generated })
+        fsops.delete {
+            delete(entries.map { it.generated })
+        }
 
         val commentPreprocessor = CommentPreprocessor(vars.get())
         sourceFiles.forEach { (relPath, inBase, outBase, overwritesPath) ->
@@ -310,7 +330,7 @@ open class PreprocessTask : DefaultTask() {
                 }
                 commentPreprocessor.convertFile(kws.value, file, outFile, javaTransform)
             } else {
-                project.copy {
+                fsops.copy {
                     from(file)
                     into(outFile.parentFile)
                 }

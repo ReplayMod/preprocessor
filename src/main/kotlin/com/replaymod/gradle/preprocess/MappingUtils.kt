@@ -8,7 +8,7 @@ import java.io.File
 fun File.readMappings(): MappingSet {
     val ext = name.substring(name.lastIndexOf(".") + 1)
     val format = MappingFormats.REGISTRY.values().find { it.standardFileExtension.orElse(null) == ext }
-            ?: throw UnsupportedOperationException("Cannot find mapping format for $this")
+        ?: throw UnsupportedOperationException("Cannot find mapping format for $this")
     return format.read(toPath())
 }
 
@@ -153,16 +153,16 @@ fun InnerClassMapping.join(b: InnerClassMapping, into: ClassMapping<*, *>) {
 
 // Like FieldMapping.merge but not horribly slow in newer lorenz versions
 fun FieldMapping.join(with: FieldMapping, parent: ClassMapping<*, *>): FieldMapping =
-        parent.createFieldMapping(signature)
-                .setDeobfuscatedName(with.deobfuscatedName)
+    parent.createFieldMapping(signature)
+        .setDeobfuscatedName(with.deobfuscatedName)
 
 // Like FieldMapping.merge but not horribly slow in newer lorenz versions
 fun MethodMapping.join(with: MethodMapping, parent: ClassMapping<*, *>): MethodMapping =
-        parent.createMethodMapping(signature)
-                .setDeobfuscatedName(with.deobfuscatedName)
-                .also { merged ->
-                    parameterMappings.forEach { paramA ->
-                        val paramB = with.getOrCreateParameterMapping(paramA.index)
-                        paramA.merge(paramB, merged)
-                    }
-                }
+    parent.createMethodMapping(signature)
+        .setDeobfuscatedName(with.deobfuscatedName)
+        .also { merged ->
+            parameterMappings.forEach { paramA ->
+                val paramB = with.getOrCreateParameterMapping(paramA.index)
+                paramA.merge(paramB, merged)
+            }
+        }
