@@ -56,13 +56,13 @@ interface ProjectGraphNodeDSL {
 }
 
 open class ProjectGraphNode(
-        val project: String,
-        val mcVersion: Int,
-        val mappings: String,
-        val links: MutableList<Pair<ProjectGraphNode, Pair<File?, Boolean>>> = mutableListOf()
+    val project: String,
+    val mcVersion: Int,
+    val mappings: String,
+    val links: MutableList<Pair<ProjectGraphNode, Pair<File?, Boolean>>> = mutableListOf()
 ) : ProjectGraphNodeDSL {
     override fun addNode(project: String, mcVersion: Int, mappings: String, extraMappings: File?, invertMappings: Boolean): ProjectGraphNodeDSL =
-            ProjectGraphNode(project, mcVersion, mappings).also { links.add(Pair(it, Pair(extraMappings, invertMappings))) }
+        ProjectGraphNode(project, mcVersion, mappings).also { links.add(Pair(it, Pair(extraMappings, invertMappings))) }
 
     fun findNode(project: String): ProjectGraphNode? = if (project == this.project) {
         this

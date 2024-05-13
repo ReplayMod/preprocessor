@@ -5,17 +5,21 @@ import org.gradle.kotlin.dsl.mapProperty
 import org.gradle.kotlin.dsl.property
 
 open class PreprocessExtension(objects: ObjectFactory, val mcVersion: Int) {
-    val vars = objects.mapProperty<String, Int>().convention(mutableMapOf(
+    val vars = objects.mapProperty<String, Int>().convention(
+        mutableMapOf(
             "MC" to mcVersion
-    ))
-    val keywords = objects.mapProperty<String, Keywords>().convention(mutableMapOf(
+        )
+    )
+    val keywords = objects.mapProperty<String, Keywords>().convention(
+        mutableMapOf(
             ".java" to PreprocessTask.DEFAULT_KEYWORDS,
             ".kt" to PreprocessTask.DEFAULT_KEYWORDS,
             ".gradle" to PreprocessTask.DEFAULT_KEYWORDS,
             ".json" to PreprocessTask.DEFAULT_KEYWORDS,
             ".mcmeta" to PreprocessTask.DEFAULT_KEYWORDS,
             ".cfg" to PreprocessTask.CFG_KEYWORDS
-    ))
+        )
+    )
     val patternAnnotation = objects.property<String>()
     val manageImports = objects.property<Boolean>()
 }

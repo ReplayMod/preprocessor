@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.util.Locale
 import java.util.stream.Collectors
 
 class PreprocessPlugin : Plugin<Project> {
@@ -49,10 +50,12 @@ class PreprocessPlugin : Plugin<Project> {
                 java.setSrcDirs(listOf(parent.file("src/$name/java")))
                 resources.setSrcDirs(listOf(parent.file("src/$name/resources")))
                 if (kotlin) {
-                    withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(listOf(
+                    withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(
+                        listOf(
                             parent.file("src/$name/kotlin"),
                             parent.file("src/$name/java")
-                    ))
+                        )
+                    )
                 }
             }
         } else {
@@ -64,11 +67,11 @@ class PreprocessPlugin : Plugin<Project> {
 
             project.the<SourceSetContainer>().configureEach {
                 val inheritedSourceSet = inherited.the<SourceSetContainer>()[name]
-                val cName = if (name == "main") "" else name.capitalize()
+                val cName = if (name == "main") "" else name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
                 val overwritesKotlin = project.file("src/$name/kotlin").also { it.mkdirs() }
                 val overwritesJava = project.file("src/$name/java").also { it.mkdirs() }
                 val overwriteResources = project.file("src/$name/resources").also { it.mkdirs() }
-                val preprocessedRoot = project.buildDir.resolve("preprocessed/$name")
+                val preprocessedRoot = project.layout.buildDirectory.asFile.get().resolve("preprocessed/$name")
                 val generatedKotlin = preprocessedRoot.resolve("kotlin")
                 val generatedJava = preprocessedRoot.resolve("java")
                 val generatedResources = preprocessedRoot.resolve("resources")
@@ -100,21 +103,22 @@ class PreprocessPlugin : Plugin<Project> {
                     patternAnnotation.convention(ext.patternAnnotation)
                     manageImports.convention(ext.manageImports)
                 }
-                val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
+                val sourceJavaTask = project.tasks.findByName("source${name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessCode)
                 java.setSrcDirs(listOf(overwritesJava, preprocessCode.map { generatedJava }))
 
                 if (kotlin) {
-                    val kotlinConsumerTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
-                            ?: project.tasks["compile${cName}Kotlin"]
+                    val kotlinConsumerTask = project.tasks.findByName("source${name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }}Kotlin")
+                        ?: project.tasks["compile${cName}Kotlin"]
                     kotlinConsumerTask.dependsOn(preprocessCode)
                     withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(
-                            listOf(
-                                overwritesKotlin,
-                                preprocessCode.map { generatedKotlin },
-                                overwritesJava,
-                                preprocessCode.map { generatedJava },
-                            ))
+                        listOf(
+                            overwritesKotlin,
+                            preprocessCode.map { generatedKotlin },
+                            overwritesJava,
+                            preprocessCode.map { generatedJava },
+                        )
+                    )
                 }
 
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
@@ -141,16 +145,18 @@ class PreprocessPlugin : Plugin<Project> {
                 val inheritedIntermediaryMappings = inherited.intermediaryMappings
                 val projectNotchMappings = project.notchMappings
                 val inheritedNotchMappings = inherited.notchMappings
-                val sourceSrg = project.buildDir.resolve(prepareTaskName).resolve("source.srg")
-                val destinationSrg = project.buildDir.resolve(prepareTaskName).resolve("destination.srg")
+                val sourceSrg = project.layout.buildDirectory.asFile.get().resolve(prepareTaskName).resolve("source.srg")
+                val destinationSrg = project.layout.buildDirectory.asFile.get().resolve(prepareTaskName).resolve("destination.srg")
                 val (prepareSourceTask, prepareDestTask) = if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null
-                        && inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
+                    && inheritedIntermediaryMappings.type == projectIntermediaryMappings.type
+                ) {
                     Pair(
                         bakeNamedToIntermediaryMappings(prepareSourceTaskName, inheritedIntermediaryMappings, sourceSrg),
                         bakeNamedToIntermediaryMappings(prepareDestTaskName, projectIntermediaryMappings, destinationSrg),
                     )
                 } else if (inheritedNotchMappings != null && projectNotchMappings != null
-                        && inheritedNode.mcVersion == projectNode.mcVersion) {
+                    && inheritedNode.mcVersion == projectNode.mcVersion
+                ) {
                     Pair(
                         bakeNamedToOfficialMappings(prepareSourceTaskName, inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg),
                         bakeNamedToOfficialMappings(prepareDestTaskName, projectNotchMappings, projectIntermediaryMappings, destinationSrg),
@@ -170,11 +176,11 @@ class PreprocessPlugin : Plugin<Project> {
                 outputs.upToDateWhen { false }
 
                 from(project.file("src"))
-                from(File(project.buildDir, "preprocessed"))
+                from(File(project.layout.buildDirectory.asFile.get(), "preprocessed"))
                 into(File(parent.projectDir, "src"))
 
                 project.the<SourceSetContainer>().all {
-                    val cName = if (name == "main") "" else name.capitalize()
+                    val cName = if (name == "main") "" else name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
 
                     dependsOn(project.tasks.named("preprocess${cName}Code"))
                     dependsOn(project.tasks.named("preprocess${cName}Resources"))
@@ -191,18 +197,18 @@ class PreprocessPlugin : Plugin<Project> {
                     fun preserveOverwrites(project: Project, toBePreserved: List<Path>?) {
                         val overwrites = project.file("src").toPath()
                         val overwritten = overwrites.toFile()
-                                .walk()
-                                .filter { it.isFile }
-                                .map { overwrites.relativize(it.toPath()) }
-                                .toList()
+                            .walk()
+                            .filter { it.isFile }
+                            .map { overwrites.relativize(it.toPath()) }
+                            .toList()
 
                         // For the soon-to-be-core project, we must not yet delete the overwrites
                         // as they have yet to be copied into the main sources.
                         if (toBePreserved != null) {
                             val source = if (project.name == coreProject) {
-                                project.parent!!.file( "src").toPath()
+                                project.parent!!.file("src").toPath()
                             } else {
-                                project.buildDir.toPath().resolve("preprocessed")
+                                project.layout.buildDirectory.asFile.get().toPath().resolve("preprocessed")
                             }
                             project.delete(overwrites)
                             toBePreserved.forEach { name ->
@@ -248,6 +254,7 @@ internal class MappingsFile(
     @PathSensitive(PathSensitivity.NONE)
     val file: File,
 )
+
 private fun Mappings.toFile() = MappingsFile(type, format, file)
 
 @CacheableTask
