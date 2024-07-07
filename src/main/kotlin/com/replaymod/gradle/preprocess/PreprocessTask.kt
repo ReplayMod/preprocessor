@@ -3,7 +3,8 @@ package com.replaymod.gradle.preprocess
 import com.replaymod.gradle.remap.Transformer
 import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
-import net.fabricmc.mapping.tree.TinyMappingFactory
+import net.fabricmc.mappingio.MappingReader
+import net.fabricmc.mappingio.tree.MemoryMappingTree
 import org.cadixdev.lorenz.MappingSet
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
@@ -221,10 +222,10 @@ open class PreprocessTask : DefaultTask() {
         val destinationMappingsFile = destinationMappings
         val mappings = if (intermediateMappingsName.isPresent && classpath != null && sourceMappingsFile != null && destinationMappingsFile != null) {
             val sharedMappingsNamespace = intermediateMappingsName.get()
-            val sourceTiny = sourceMappingsFile.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
-            val destinationTiny = destinationMappingsFile.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
-            val sourceMappings = TinyReader(sourceTiny, "named", sharedMappingsNamespace).read()
-            val destinationMappings = TinyReader(destinationTiny, "named", sharedMappingsNamespace).read()
+            val srcTree = MemoryMappingTree().also { MappingReader.read(sourceMappingsFile.toPath(), it) }
+            val dstTree = MemoryMappingTree().also { MappingReader.read(destinationMappingsFile.toPath(), it) }
+            val sourceMappings = TinyReader(srcTree, "named", sharedMappingsNamespace).read()
+            val destinationMappings = TinyReader(dstTree, "named", sharedMappingsNamespace).read()
             if (mapping != null) {
                     val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
                     val clsMap = legacyMap.splitOffClassMappings()

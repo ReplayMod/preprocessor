@@ -55,7 +55,7 @@ dependencies {
     implementation(gradleApi())
     implementation(localGroovy())
     implementation("com.github.replaymod:remap:5134612")
-    implementation("net.fabricmc:tiny-mappings-parser:0.2.1.13")
+    implementation("net.fabricmc:mapping-io:0.6.1")
     testImplementation("io.kotest:kotest-runner-junit5-jvm:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core-jvm:$kotestVersion")
 }

@@ -1,6 +1,7 @@
 package com.replaymod.gradle.preprocess
 
-import net.fabricmc.mapping.tree.TinyMappingFactory
+import net.fabricmc.mappingio.MappingReader
+import net.fabricmc.mappingio.tree.MemoryMappingTree
 import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
@@ -284,7 +285,7 @@ internal abstract class BakeNamedToIntermediaryMappings : DefaultTask() {
     fun prepare() {
         val mappings = mappings.get()
         val mapping = if (mappings.format == "tiny") {
-            val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
+            val tiny = MemoryMappingTree().also { MappingReader.read(mappings.file.toPath(), it) }
             TinyReader(tiny, "named", if (mappings.type == "searge") "srg" else "intermediary").read()
         } else {
             readMappings(mappings.format, mappings.file.toPath())
@@ -309,7 +310,7 @@ internal abstract class BakeNamedToOfficialMappings : DefaultTask() {
     fun prepare() {
         val mappings = mappings.get()
         val mapping = if (mappings.format == "tiny") {
-            val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
+            val tiny = MemoryMappingTree().also { MappingReader.read(mappings.file.toPath(), it) }
             TinyReader(tiny, "named", "official").read()
         } else {
             val iMappings = namedToIntermediaryMappings.get()

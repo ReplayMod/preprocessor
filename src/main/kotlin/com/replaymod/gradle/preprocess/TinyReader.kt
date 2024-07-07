@@ -1,22 +1,25 @@
 package com.replaymod.gradle.preprocess
 
-import net.fabricmc.mapping.tree.TinyTree
+import net.fabricmc.mappingio.tree.MappingTree
 import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingsReader
 import java.io.IOException
 
-class TinyReader(private val m: TinyTree, private val from: String, private val to: String) : MappingsReader() {
+internal class TinyReader(private val m: MappingTree, from: String, to: String) : MappingsReader() {
+    private val fromId = m.getNamespaceId(from)
+    private val toId = m.getNamespaceId(to)
+
     override fun read(mappings: MappingSet): MappingSet {
         for (cls in m.classes) {
-            val clsMapping = mappings.getOrCreateClassMapping(cls.getName(from))
-            clsMapping.deobfuscatedName = cls.getName(to)
+            val clsMapping = mappings.getOrCreateClassMapping(cls.getName(fromId))
+            clsMapping.deobfuscatedName = cls.getName(toId)
 
             for (field in cls.fields) {
-                clsMapping.getOrCreateFieldMapping(field.getName(from), field.getDescriptor(from)).deobfuscatedName = field.getName(to)
+                clsMapping.getOrCreateFieldMapping(field.getName(fromId), field.getDesc(fromId)).deobfuscatedName = field.getName(toId)
             }
 
             for (method in cls.methods) {
-                clsMapping.getOrCreateMethodMapping(method.getName(from), method.getDescriptor(from)).deobfuscatedName = method.getName(to)
+                clsMapping.getOrCreateMethodMapping(method.getName(fromId), method.getDesc(fromId)).deobfuscatedName = method.getName(toId)
             }
         }
         return mappings
