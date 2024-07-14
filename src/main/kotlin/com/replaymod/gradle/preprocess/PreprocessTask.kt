@@ -3,7 +3,9 @@ package com.replaymod.gradle.preprocess
 import com.replaymod.gradle.remap.Transformer
 import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
+import net.fabricmc.mappingio.MappedElementKind
 import net.fabricmc.mappingio.MappingReader
+import net.fabricmc.mappingio.tree.MappingTree
 import net.fabricmc.mappingio.tree.MemoryMappingTree
 import org.cadixdev.lorenz.MappingSet
 import org.gradle.api.DefaultTask
@@ -132,6 +134,9 @@ open class PreprocessTask : DefaultTask() {
     @Optional // required if source or destination mappings have more than two namespaces (optional for backwards compat)
     val intermediateMappingsName = project.objects.property<String>()
 
+    @Input
+    val strictExtraMappings = project.objects.property<Boolean>().convention(false)
+
     @InputFile
     @Optional
     @PathSensitive(PathSensitivity.NONE)
@@ -224,22 +229,41 @@ open class PreprocessTask : DefaultTask() {
             val sharedMappingsNamespace = intermediateMappingsName.get()
             val srcTree = MemoryMappingTree().also { MappingReader.read(sourceMappingsFile.toPath(), it) }
             val dstTree = MemoryMappingTree().also { MappingReader.read(destinationMappingsFile.toPath(), it) }
-            val sourceMappings = TinyReader(srcTree, "named", sharedMappingsNamespace).read()
-            val destinationMappings = TinyReader(dstTree, "named", sharedMappingsNamespace).read()
-            if (mapping != null) {
+            if (strictExtraMappings.get()) {
+                srcTree.setIndexByDstNames(true)
+                dstTree.setIndexByDstNames(true)
+                val extTree = mapping?.let { file ->
+                    try {
+                        val ast = ExtraMapping.read(file.toPath())
+                        if (!reverseMapping) {
+                            ast.resolve(logger, srcTree, dstTree, "named", sharedMappingsNamespace).first
+                        } else {
+                            ast.resolve(logger, dstTree, srcTree, "named", sharedMappingsNamespace).second
+                        }
+                    } catch (e: Exception) {
+                        throw GradleException("Failed to parse $file: ${e.message}", e)
+                    }
+                } ?: MemoryMappingTree().apply { visitNamespaces("source", listOf("destination")) }
+                val mrgTree = mergeMappings(srcTree, dstTree, extTree, sharedMappingsNamespace)
+                TinyReader(mrgTree, "source", "destination").read()
+            } else {
+                val sourceMappings = TinyReader(srcTree, "named", sharedMappingsNamespace).read()
+                val destinationMappings = TinyReader(dstTree, "named", sharedMappingsNamespace).read()
+                if (mapping != null) {
                     val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
                     val clsMap = legacyMap.splitOffClassMappings()
                     val srcMap = sourceMappings
                     val dstMap = destinationMappings
                     legacyMap.mergeBoth(
-                            // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
-                            // dstMap and would otherwise be filtered by the join)
-                            srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
-                            MappingSet.create(LegacyMappingSetModelFactory()))
-            } else {
-                val srcMap = sourceMappings!!
-                val dstMap = destinationMappings!!
-                srcMap.join(dstMap.reverse())
+                        // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
+                        // dstMap and would otherwise be filtered by the join)
+                        srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
+                        MappingSet.create(LegacyMappingSetModelFactory()))
+                } else {
+                    val srcMap = sourceMappings!!
+                    val dstMap = destinationMappings!!
+                    srcMap.join(dstMap.reverse())
+                }
             }
         } else if (!intermediateMappingsName.isPresent && classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
             if (mapping != null) {
@@ -352,6 +376,105 @@ open class PreprocessTask : DefaultTask() {
         if (commentPreprocessor.fail) {
             throw GradleException("Failed to remap sources. See errors above for details.")
         }
+    }
+
+    private fun mergeMappings(
+        srcTree: MappingTree,
+        dstTree: MappingTree,
+        extTree: MemoryMappingTree,
+        sharedNamespace: String,
+    ): MappingTree {
+        val srcNamedNsId = srcTree.getNamespaceId("named")
+        val srcSharedNsId = srcTree.getNamespaceId(sharedNamespace)
+        val dstSharedNsId = dstTree.getNamespaceId(sharedNamespace)
+        val dstNamedNsId = dstTree.getNamespaceId("named")
+        val extSrcNsId = extTree.getNamespaceId("source")
+        val extDstNsId = extTree.getNamespaceId("destination")
+
+        val tmpTree = MemoryMappingTree()
+        tmpTree.visitNamespaces(dstTree.srcNamespace, dstTree.dstNamespaces)
+        val mrgTree = MemoryMappingTree()
+        mrgTree.visitNamespaces("source", listOf("destination"))
+
+        fun injectExtraMembers(extCls: MappingTree.ClassMapping) {
+            for (extField in extCls.fields) {
+                val srcName = extField.getName(extSrcNsId)
+                val srcDesc = extField.getDesc(extSrcNsId)
+                if (srcDesc == null) {
+                    logger.error("Owner ${extCls.getName(extSrcNsId)} of field $srcName does not appear to have any mappings. " +
+                        "As such, you must provide the full signature of this method manually " +
+                        "(if it does not change across versions, providing it for either version is sufficient).")
+                    continue
+                }
+                mrgTree.visitField(srcName, srcDesc)
+                mrgTree.visitDstName(MappedElementKind.FIELD, 0, extField.getName(extDstNsId))
+            }
+            for (extMethod in extCls.methods) {
+                val srcName = extMethod.getName(extSrcNsId)
+                val srcDesc = extMethod.getDesc(extSrcNsId)
+                if (srcDesc == null) {
+                    logger.error("Owner ${extCls.getName(extSrcNsId)} of method $srcName does not appear to have any mappings. " +
+                        "As such, you must provide the full signature of this method manually " +
+                        "(if it does not change across versions, providing it for either version is sufficient).")
+                    continue
+                }
+                mrgTree.visitMethod(srcName, srcDesc)
+                mrgTree.visitDstName(MappedElementKind.METHOD, 0, extMethod.getName(extDstNsId))
+            }
+        }
+
+        for (srcCls in srcTree.classes) {
+            val extCls = extTree.removeClass(srcCls.getName(srcNamedNsId))
+            val dstCls = if (extCls != null) {
+                val dstName = extCls.getName(extDstNsId)
+                dstTree.getClass(dstName, dstNamedNsId) ?: run {
+                    tmpTree.visitClass(dstName)
+                    tmpTree.visitDstName(MappedElementKind.CLASS, dstNamedNsId, dstName)
+                    tmpTree.getClass(dstName)!!
+                }
+            } else {
+                dstTree.getClass(srcCls.getName(srcSharedNsId), dstSharedNsId) ?: continue
+            }
+            mrgTree.visitClass(srcCls.getName(srcNamedNsId))
+            mrgTree.visitDstName(MappedElementKind.CLASS, 0, dstCls.getName(dstNamedNsId))
+            for (srcField in srcCls.fields) {
+                val extField = extCls?.getField(srcField.getName(srcNamedNsId), srcField.getDesc(srcNamedNsId), extSrcNsId)
+                if (extField != null) {
+                    extCls.removeField(extField.srcName, extField.srcDesc)
+                    mrgTree.visitField(srcField.getName(srcNamedNsId), srcField.getDesc(srcNamedNsId))
+                    mrgTree.visitDstName(MappedElementKind.FIELD, 0, extField.getName(extDstNsId))
+                    continue
+                }
+                val dstField = dstCls.getField(srcField.getName(srcSharedNsId), srcField.getDesc(srcSharedNsId), dstSharedNsId)
+                    ?: dstCls.getField(srcField.getName(srcSharedNsId), null, dstSharedNsId)
+                    ?: continue
+                mrgTree.visitField(srcField.getName(srcNamedNsId), srcField.getDesc(srcNamedNsId))
+                mrgTree.visitDstName(MappedElementKind.FIELD, 0, dstField.getName(dstNamedNsId))
+            }
+            for (srcMethod in srcCls.methods) {
+                val extMethod = extCls?.getMethod(srcMethod.getName(srcNamedNsId), srcMethod.getDesc(srcNamedNsId), extSrcNsId)
+                if (extMethod != null) {
+                    extCls.removeMethod(extMethod.srcName, extMethod.srcDesc)
+                    mrgTree.visitMethod(srcMethod.getName(srcNamedNsId), srcMethod.getDesc(srcNamedNsId))
+                    mrgTree.visitDstName(MappedElementKind.METHOD, 0, extMethod.getName(extDstNsId))
+                    continue
+                }
+                val dstMethod = dstCls.getMethod(srcMethod.getName(srcSharedNsId), srcMethod.getDesc(srcSharedNsId), dstSharedNsId)
+                    ?: dstCls.getMethod(srcMethod.getName(srcSharedNsId), null, dstSharedNsId)
+                    ?: continue
+                mrgTree.visitMethod(srcMethod.getName(srcNamedNsId), srcMethod.getDesc(srcNamedNsId))
+                mrgTree.visitDstName(MappedElementKind.METHOD, 0, dstMethod.getName(dstNamedNsId))
+            }
+            if (extCls != null) {
+                injectExtraMembers(extCls)
+            }
+        }
+        for (extCls in extTree.classes) {
+            mrgTree.visitClass(extCls.getName(extSrcNsId))
+            mrgTree.visitDstName(MappedElementKind.CLASS, 0, extCls.getName(extDstNsId))
+            injectExtraMembers(extCls)
+        }
+        return mrgTree
     }
 }
 

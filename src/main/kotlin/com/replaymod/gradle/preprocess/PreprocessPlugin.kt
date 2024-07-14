@@ -140,6 +140,9 @@ class PreprocessPlugin : Plugin<Project> {
                 if ("genSrgs" in project.tasks.names || "createMcpToSrg" in project.tasks.names) {
                     logger.warn("ForgeGradle compatibility in Preprocessor is deprecated." +
                         "Consider switching to architectury-loom (or essential-loom for FG2).")
+                    if (rootExtension.strictExtraMappings.getOrElse(false)) {
+                        throw UnsupportedOperationException("Strict mappings are only supported with Loom.")
+                    }
                 } else {
                     val projectSrgMappings = project.tinyMappingsWithSrg
                     val inheritedSrgMappings = inherited.tinyMappingsWithSrg
@@ -157,6 +160,14 @@ class PreprocessPlugin : Plugin<Project> {
                         } else {
                             throw IllegalStateException("Failed to find mappings from $inherited to $project.")
                         }
+                        strictExtraMappings.convention(rootExtension.strictExtraMappings.orElse(false))
+                    }
+
+                    if (!rootExtension.strictExtraMappings.isPresent) {
+                        logger.warn("Legacy extra mappings are deprecated. " +
+                            "Please consider enabling strict extra mappings via " +
+                            "`preprocess.strictExtraMappings.set(true)` in your root project. " +
+                            "You may suppress this message by explicitly setting it to `false`.")
                     }
                     return@afterEvaluate
                 }
