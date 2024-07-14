@@ -134,6 +134,13 @@ class PreprocessPlugin : Plugin<Project> {
                 }
                 project.tasks["process${cName}Resources"].dependsOn(preprocessResources)
                 resources.setSrcDirs(listOf(overwriteResources, preprocessResources.map { generatedResources }))
+
+                if (mappingFile != null && name == "main") {
+                    project.tasks.register<CleanupUnnecessaryMappingsTask>("cleanupUnnecessaryMappings") {
+                        this.task.set(preprocessCode)
+                        this.mappingFile.set(mappingFile)
+                    }
+                }
             }
 
             project.afterEvaluate {

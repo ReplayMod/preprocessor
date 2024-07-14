@@ -206,6 +206,10 @@ open class PreprocessTask : DefaultTask() {
 
     @TaskAction
     fun preprocess() {
+        preprocess(mapping, entries)
+    }
+
+    fun preprocess(mapping: File?, entries: List<InOut>) {
         data class Entry(val relPath: String, val inBase: Path, val outBase: Path, val overwritesBase: Path?)
         val sourceFiles: List<Entry> = entries.flatMap { inOut ->
             val outBasePath = inOut.generated.toPath()
@@ -221,7 +225,6 @@ open class PreprocessTask : DefaultTask() {
 
         var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
 
-        val mapping = mapping
         val classpath = classpath
         val sourceMappingsFile = sourceMappings
         val destinationMappingsFile = destinationMappings
