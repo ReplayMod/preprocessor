@@ -233,6 +233,9 @@ open class PreprocessTask : DefaultTask() {
             val srcTree = MemoryMappingTree().also { MappingReader.read(sourceMappingsFile.toPath(), it) }
             val dstTree = MemoryMappingTree().also { MappingReader.read(destinationMappingsFile.toPath(), it) }
             if (strictExtraMappings.get()) {
+                if (sharedMappingsNamespace == "srg") {
+                    inferSharedClassMappings(srcTree, dstTree, sharedMappingsNamespace)
+                }
                 srcTree.setIndexByDstNames(true)
                 dstTree.setIndexByDstNames(true)
                 val extTree = mapping?.let { file ->
@@ -379,6 +382,155 @@ open class PreprocessTask : DefaultTask() {
         if (commentPreprocessor.fail) {
             throw GradleException("Failed to remap sources. See errors above for details.")
         }
+    }
+
+    /**
+     * Tries to infer shared classes based on shared members.
+     *
+     * Forge uses intermediate mappings ("SRG", same as the original file format they came in) which do not contain
+     * intermediate names for classes, only methods and fields. As such, one would have to manually declare mappings
+     * for all classes one cares about.
+     * It does however still track methods and fields even when the class name changes, so we can make use of those
+     * to infer a good deal of class mappings automatically.
+     *
+     * This method infers these mappings, and updates the input trees to use them.
+     */
+    private fun inferSharedClassMappings(
+        srcTree: MemoryMappingTree,
+        dstTree: MemoryMappingTree,
+        sharedNamespace: String,
+    ) {
+        val srcNsId = srcTree.getNamespaceId(sharedNamespace)
+        val dstNsId = dstTree.getNamespaceId(sharedNamespace)
+
+        val done = mutableSetOf<String>()
+
+        // Check for classes which didn't change their name (presumably)
+        for (srcCls in srcTree.classes) {
+            val srcName = srcCls.getName(srcNsId)!!
+            if (dstTree.getClass(srcName, dstNsId) != null) {
+                done.add(srcName)
+            }
+        }
+
+        // This isn't entirely straightforward though because inherited methods (and their synthetic overload methods)
+        // have the same names as super methods, so we can't just assume a match on the first shared method.
+        // Instead, we'll do multiple rounds and in each one we only pair those classes that unambiguously match.
+        var nextSharedId = 0
+        do {
+            val doneBeforeRound = done.size
+
+            val srcMemberToClass = mutableMapOf<String, MutableList<String>>()
+            for (cls in srcTree.classes) {
+                val clsName = cls.getName(srcNsId)!!
+                if (clsName in done) {
+                    continue
+                }
+                for (field in cls.fields) {
+                    val name = field.getName(srcNsId)!!
+                    if (!name.startsWith("field_")) continue
+                    srcMemberToClass.getOrPut(name, ::mutableListOf).add(clsName)
+                }
+                for (method in cls.methods) {
+                    val name = method.getName(srcNsId)!!
+                    if (!name.startsWith("func_")) continue
+                    srcMemberToClass.getOrPut(name, ::mutableListOf).add(clsName)
+                }
+            }
+            val dstMemberToClass = mutableMapOf<String, MutableList<String>>()
+            for (cls in dstTree.classes) {
+                val clsName = cls.getName(dstNsId)!!
+                if (clsName in done) {
+                    continue
+                }
+                for (field in cls.fields) {
+                    val name = field.getName(dstNsId)!!
+                    if (!name.startsWith("field_")) continue
+                    dstMemberToClass.getOrPut(name, ::mutableListOf).add(clsName)
+                }
+                for (method in cls.methods) {
+                    val name = method.getName(dstNsId)!!
+                    if (!name.startsWith("func_")) continue
+                    dstMemberToClass.getOrPut(name, ::mutableListOf).add(clsName)
+                }
+            }
+
+            val srcMappings = tryInferMapping(srcTree, srcNsId, dstMemberToClass, done)
+            val dstMappings = tryInferMapping(dstTree, dstNsId, srcMemberToClass, done)
+
+            for ((srcName, dstNames) in srcMappings) {
+                if (dstNames.isEmpty()) {
+                    continue
+                }
+                if (dstNames.size > 1) {
+                    // println("Multiple dst classes for $srcName: $dstNames")
+                    continue
+                }
+                val dstName = dstNames.single()
+
+                val revSrcNames = dstMappings.getValue(dstName)
+                assert(revSrcNames.isNotEmpty())
+                if (revSrcNames.size > 1) {
+                    // println("Multiple src classes for $dstName: $revSrcNames")
+                    continue
+                }
+                val revSrcName = revSrcNames.single()
+                if (revSrcName != srcName) {
+                    // println("Conflicting mappings $srcName -> $dstName -> $revSrcName")
+                    continue
+                }
+
+                val srcCls = srcTree.getClass(srcName, srcNsId)!!
+                val dstCls = dstTree.getClass(dstName, dstNsId)!!
+
+                val sharedName = "class_${nextSharedId++}"
+                // println("Discovered mapping $srcName -> $dstName, assigning $sharedName")
+                srcCls.setDstName(sharedName, srcNsId)
+                dstCls.setDstName(sharedName, dstNsId)
+                done.add(sharedName)
+            }
+        } while (done.size > doneBeforeRound)
+    }
+
+    private fun tryInferMapping(
+        srcTree: MappingTree,
+        srcNsId: Int,
+        dstMemberToClass: Map<String, List<String>>,
+        done: Set<String>,
+    ): Map<String, Collection<String>> {
+        val results = mutableMapOf<String, Collection<String>>()
+        for (srcCls in srcTree.classes) {
+            val srcName = srcCls.getName(srcNsId)!!
+            if (srcName in done) {
+                continue
+            }
+
+            val candidates = mutableMapOf<String, Int>()
+
+            for (srcField in srcCls.fields) {
+                for (dstCls in dstMemberToClass[srcField.getName(srcNsId)!!] ?: emptyList()) {
+                    candidates.compute(dstCls) { _, n -> (n ?: 0) + 1 }
+                }
+            }
+            for (srcMethod in srcCls.methods) {
+                for (dstCls in dstMemberToClass[srcMethod.getName(srcNsId)!!] ?: emptyList()) {
+                    candidates.compute(dstCls) { _, n -> (n ?: 0) + 1 }
+                }
+            }
+
+            if (candidates.isEmpty()) {
+                results[srcName] = emptyList()
+                continue
+            }
+
+            val (bestName, bestCount) = candidates.maxBy { it.value }
+            if (candidates.all { (name, count) -> name === bestName || count < bestCount }) {
+                results[srcName] = listOf(bestName)
+            } else {
+                results[srcName] = candidates.keys
+            }
+        }
+        return results
     }
 
     private fun mergeMappings(
