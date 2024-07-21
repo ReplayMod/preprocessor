@@ -459,6 +459,6 @@ private class UnsupportedLoom(msg: String) : GradleException("Loom version not s
 private fun Provider<Directory>.dir(path: String): Provider<Directory> =
     map { it.dir(path) }
 
-private fun String.uppercaseFirstChar() = if (isNotEmpty()) get(0).toUpperCase() + substring(1) else ""
+private fun String.uppercaseFirstChar() = replaceFirstChar { it.uppercaseChar() }
 
 private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)
