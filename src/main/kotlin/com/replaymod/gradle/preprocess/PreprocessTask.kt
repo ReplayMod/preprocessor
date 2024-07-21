@@ -196,7 +196,7 @@ open class PreprocessTask : DefaultTask() {
         replaceWith = ReplaceWith(expression = "classpath = task.classpath"))
     fun compileTask(task: AbstractCompile) {
         dependsOn(task)
-        classpath = (classpath ?: project.files()) + task.classpath + project.files(task.destinationDir)
+        classpath = (classpath ?: project.files()) + task.classpath + project.files(task.destinationDirectory)
     }
 
     @TaskAction

@@ -9,10 +9,12 @@ import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
+import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
 import org.gradle.api.tasks.compile.JavaCompile
@@ -65,21 +67,21 @@ class PreprocessPlugin : Plugin<Project> {
 
             project.the<SourceSetContainer>().configureEach {
                 val inheritedSourceSet = inherited.the<SourceSetContainer>()[name]
-                val cName = if (name == "main") "" else name.capitalize()
+                val cName = if (name == "main") "" else name.uppercaseFirstChar()
                 val overwritesKotlin = project.file("src/$name/kotlin").also { it.mkdirs() }
                 val overwritesJava = project.file("src/$name/java").also { it.mkdirs() }
                 val overwriteResources = project.file("src/$name/resources").also { it.mkdirs() }
-                val preprocessedRoot = project.buildDir.resolve("preprocessed/$name")
-                val generatedKotlin = preprocessedRoot.resolve("kotlin")
-                val generatedJava = preprocessedRoot.resolve("java")
-                val generatedResources = preprocessedRoot.resolve("resources")
+                val preprocessedRoot = project.layout.buildDirectory.dir("preprocessed/$name")
+                val generatedKotlin = preprocessedRoot.dir("kotlin")
+                val generatedJava = preprocessedRoot.dir("java")
+                val generatedResources = preprocessedRoot.dir("resources")
 
                 val preprocessCode = project.tasks.register<PreprocessTask>("preprocess${cName}Code") {
                     inherited.tasks.findByPath("preprocess${cName}Code")?.let { dependsOn(it) }
                     entry(
                         source = inherited.files(inheritedSourceSet.java.srcDirs),
                         overwrites = overwritesJava,
-                        generated = generatedJava,
+                        generated = generatedJava.get().asFile,
                     )
                     if (kotlin) {
                         entry(
@@ -87,7 +89,7 @@ class PreprocessPlugin : Plugin<Project> {
                                 it.endsWith("kotlin")
                             }),
                             overwrites = overwritesKotlin,
-                            generated = generatedKotlin,
+                            generated = generatedKotlin.get().asFile,
                         )
                     }
                     jdkHome.set((inherited.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
@@ -101,12 +103,12 @@ class PreprocessPlugin : Plugin<Project> {
                     patternAnnotation.convention(ext.patternAnnotation)
                     manageImports.convention(ext.manageImports)
                 }
-                val sourceJavaTask = project.tasks.findByName("source${name.capitalize()}Java")
+                val sourceJavaTask = project.tasks.findByName("source${name.uppercaseFirstChar()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessCode)
                 java.setSrcDirs(listOf(overwritesJava, preprocessCode.map { generatedJava }))
 
                 if (kotlin) {
-                    val kotlinConsumerTask = project.tasks.findByName("source${name.capitalize()}Kotlin")
+                    val kotlinConsumerTask = project.tasks.findByName("source${name.uppercaseFirstChar()}Kotlin")
                             ?: project.tasks["compile${cName}Kotlin"]
                     kotlinConsumerTask.dependsOn(preprocessCode)
                     withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.setSrcDirs(
@@ -123,7 +125,7 @@ class PreprocessPlugin : Plugin<Project> {
                     entry(
                         source = inherited.files(inheritedSourceSet.resources.srcDirs),
                         overwrites = overwriteResources,
-                        generated = generatedResources,
+                        generated = generatedResources.get().asFile,
                     )
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
@@ -165,8 +167,8 @@ class PreprocessPlugin : Plugin<Project> {
                 val inheritedIntermediaryMappings = inherited.intermediaryMappings
                 val projectNotchMappings = project.notchMappings
                 val inheritedNotchMappings = inherited.notchMappings
-                val sourceSrg = project.buildDir.resolve(prepareTaskName).resolve("source.srg")
-                val destinationSrg = project.buildDir.resolve(prepareTaskName).resolve("destination.srg")
+                val sourceSrg = project.layout.buildDirectory.get().asFile.resolve(prepareTaskName).resolve("source.srg")
+                val destinationSrg = project.layout.buildDirectory.get().asFile.resolve(prepareTaskName).resolve("destination.srg")
                 val (prepareSourceTask, prepareDestTask) = if (inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
                     Pair(
                         bakeNamedToIntermediaryMappings(prepareSourceTaskName, inheritedIntermediaryMappings, sourceSrg),
@@ -193,11 +195,11 @@ class PreprocessPlugin : Plugin<Project> {
                 outputs.upToDateWhen { false }
 
                 from(project.file("src"))
-                from(File(project.buildDir, "preprocessed"))
-                into(File(parent.projectDir, "src"))
+                from(project.layout.buildDirectory.dir("preprocessed"))
+                into(project.layout.projectDirectory.dir("src"))
 
                 project.the<SourceSetContainer>().all {
-                    val cName = if (name == "main") "" else name.capitalize()
+                    val cName = if (name == "main") "" else name.uppercaseFirstChar()
 
                     dependsOn(project.tasks.named("preprocess${cName}Code"))
                     dependsOn(project.tasks.named("preprocess${cName}Resources"))
@@ -225,7 +227,7 @@ class PreprocessPlugin : Plugin<Project> {
                             val source = if (project.name == coreProject) {
                                 project.parent!!.file( "src").toPath()
                             } else {
-                                project.buildDir.toPath().resolve("preprocessed")
+                                project.layout.buildDirectory.dir("preprocessed").get().asFile.toPath()
                             }
                             project.delete(overwrites)
                             toBePreserved.forEach { name ->
@@ -453,5 +455,10 @@ private val Task.classpath: FileCollection?
     }
 
 private class UnsupportedLoom(msg: String) : GradleException("Loom version not supported by preprocess plugin: $msg")
+
+private fun Provider<Directory>.dir(path: String): Provider<Directory> =
+    map { it.dir(path) }
+
+private fun String.uppercaseFirstChar() = if (isNotEmpty()) get(0).toUpperCase() + substring(1) else ""
 
 private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)
