@@ -148,7 +148,8 @@ class PreprocessPlugin : Plugin<Project> {
                         bakeNamedToIntermediaryMappings(prepareSourceTaskName, inheritedIntermediaryMappings, sourceSrg),
                         bakeNamedToIntermediaryMappings(prepareDestTaskName, projectIntermediaryMappings, destinationSrg),
                     )
-                } else if (inheritedNode.mcVersion == projectNode.mcVersion) {
+                } else if (inheritedNotchMappings != null && projectNotchMappings != null
+                        && inheritedNode.mcVersion == projectNode.mcVersion) {
                     Pair(
                         bakeNamedToOfficialMappings(prepareSourceTaskName, inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg),
                         bakeNamedToOfficialMappings(prepareDestTaskName, projectNotchMappings, projectIntermediaryMappings, destinationSrg),
@@ -357,8 +358,11 @@ private val Project.intermediaryMappings: Mappings
 
 data class Mappings(val type: String, val file: File, val format: String, val tasks: List<Task>)
 
-private val Project.notchMappings: Mappings
+private val Project.notchMappings: Mappings?
     get() {
+        project.tasks.findByName("genSrgs")?.let { // FG2
+            return null // Unsupported
+        }
         project.tasks.findByName("extractSrg")?.let { // FG3-5
             val output = it.property("output")
             // FG3+4 returns a File, FG5 a RegularFileProperty
