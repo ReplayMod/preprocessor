@@ -351,12 +351,7 @@ private val Project.intermediaryMappings: Mappings
                 Mappings("searge", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
             }
         }
-        mappingsProvider.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
-            val file = (it as Path).toFile()
-            if (file.exists()) {
-                return Mappings("searge", file, "tiny", emptyList())
-            }
-        }
+        tinyMappingsWithSrg?.let { return Mappings("searge", it, "tiny", emptyList()) }
         return Mappings("yarn", tinyMappings, "tiny", emptyList())
     }
 
@@ -403,6 +398,17 @@ private val Project.tinyMappings: File
             }
         }
         throw UnsupportedLoom("Failed to find tiny mappings file")
+    }
+
+private val Project.tinyMappingsWithSrg: File?
+    get() {
+        mappingsProvider.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
+            val file = (it as Path).toFile()
+            if (file.exists()) {
+                return file
+            }
+        }
+        return null
     }
 
 private val Task.classpath: FileCollection?
