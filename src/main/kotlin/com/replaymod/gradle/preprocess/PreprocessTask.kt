@@ -5,7 +5,6 @@ import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
 import net.fabricmc.mapping.tree.TinyMappingFactory
 import org.cadixdev.lorenz.MappingSet
-import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileTree
@@ -266,9 +265,6 @@ open class PreprocessTask : DefaultTask() {
         }
         if (mappings != null) {
             classpath!!
-            MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath().also {
-                Files.createDirectories(it.parent)
-            })
             val javaTransformer = Transformer(mappings)
             javaTransformer.patternAnnotation = patternAnnotation.orNull
             javaTransformer.manageImports = manageImports.getOrElse(false)
