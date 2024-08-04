@@ -137,6 +137,25 @@ class PreprocessPlugin : Plugin<Project> {
                 if ("genSrgs" in project.tasks.names || "createMcpToSrg" in project.tasks.names) {
                     logger.warn("ForgeGradle compatibility in Preprocessor is deprecated." +
                         "Consider switching to architectury-loom (or essential-loom for FG2).")
+                } else {
+                    val projectSrgMappings = project.tinyMappingsWithSrg
+                    val inheritedSrgMappings = inherited.tinyMappingsWithSrg
+                    val projectTinyMappings = project.tinyMappings
+                    val inheritedTinyMappings = inherited.tinyMappings
+                    tasks.withType<PreprocessTask>().configureEach {
+                        if ((inheritedSrgMappings != null) == (projectSrgMappings != null)) {
+                            sourceMappings = inheritedSrgMappings ?: inheritedTinyMappings
+                            destinationMappings = projectSrgMappings ?: projectTinyMappings
+                            intermediateMappingsName.set(if (projectSrgMappings != null) "srg" else "intermediary")
+                        } else if (inheritedNode.mcVersion == projectNode.mcVersion) {
+                            sourceMappings = inheritedTinyMappings
+                            destinationMappings = projectTinyMappings
+                            intermediateMappingsName.set("official")
+                        } else {
+                            throw IllegalStateException("Failed to find mappings from $inherited to $project.")
+                        }
+                    }
+                    return@afterEvaluate
                 }
                 val prepareTaskName = "prepareMappingsForPreprocessor"
                 val prepareSourceTaskName = "prepareSourceMappingsForPreprocessor"

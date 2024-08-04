@@ -3,6 +3,7 @@ package com.replaymod.gradle.preprocess
 import com.replaymod.gradle.remap.Transformer
 import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
+import net.fabricmc.mapping.tree.TinyMappingFactory
 import org.cadixdev.lorenz.MappingSet
 import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
@@ -126,6 +127,11 @@ open class PreprocessTask : DefaultTask() {
     @PathSensitive(PathSensitivity.NONE)
     var destinationMappings: File? = null
 
+    // Note: Requires that source and destination mappings files to be in `tiny` format.
+    @Input
+    @Optional // required if source or destination mappings have more than two namespaces (optional for backwards compat)
+    val intermediateMappingsName = project.objects.property<String>()
+
     @InputFile
     @Optional
     @PathSensitive(PathSensitivity.NONE)
@@ -212,8 +218,31 @@ open class PreprocessTask : DefaultTask() {
 
         val mapping = mapping
         val classpath = classpath
-        if (classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
-            val mappings = if (mapping != null) {
+        val sourceMappingsFile = sourceMappings
+        val destinationMappingsFile = destinationMappings
+        val mappings = if (intermediateMappingsName.isPresent && classpath != null && sourceMappingsFile != null && destinationMappingsFile != null) {
+            val sharedMappingsNamespace = intermediateMappingsName.get()
+            val sourceTiny = sourceMappingsFile.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
+            val destinationTiny = destinationMappingsFile.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
+            val sourceMappings = TinyReader(sourceTiny, "named", sharedMappingsNamespace).read()
+            val destinationMappings = TinyReader(destinationTiny, "named", sharedMappingsNamespace).read()
+            if (mapping != null) {
+                    val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
+                    val clsMap = legacyMap.splitOffClassMappings()
+                    val srcMap = sourceMappings
+                    val dstMap = destinationMappings
+                    legacyMap.mergeBoth(
+                            // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
+                            // dstMap and would otherwise be filtered by the join)
+                            srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
+                            MappingSet.create(LegacyMappingSetModelFactory()))
+            } else {
+                val srcMap = sourceMappings!!
+                val dstMap = destinationMappings!!
+                srcMap.join(dstMap.reverse())
+            }
+        } else if (!intermediateMappingsName.isPresent && classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
+            if (mapping != null) {
                 if (sourceMappings != null && destinationMappings != null) {
                     val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
                     val clsMap = legacyMap.splitOffClassMappings()
@@ -232,6 +261,11 @@ open class PreprocessTask : DefaultTask() {
                 val dstMap = destinationMappings!!.readMappings()
                 srcMap.join(dstMap.reverse())
             }
+        } else {
+            null
+        }
+        if (mappings != null) {
+            classpath!!
             MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath().also {
                 Files.createDirectories(it.parent)
             })
