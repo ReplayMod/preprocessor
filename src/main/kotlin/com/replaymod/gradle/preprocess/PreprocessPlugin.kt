@@ -143,14 +143,12 @@ class PreprocessPlugin : Plugin<Project> {
                 val inheritedNotchMappings = inherited.notchMappings
                 val sourceSrg = project.buildDir.resolve(prepareTaskName).resolve("source.srg")
                 val destinationSrg = project.buildDir.resolve(prepareTaskName).resolve("destination.srg")
-                val (prepareSourceTask, prepareDestTask) = if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null
-                        && inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
+                val (prepareSourceTask, prepareDestTask) = if (inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
                     Pair(
                         bakeNamedToIntermediaryMappings(prepareSourceTaskName, inheritedIntermediaryMappings, sourceSrg),
                         bakeNamedToIntermediaryMappings(prepareDestTaskName, projectIntermediaryMappings, destinationSrg),
                     )
-                } else if (inheritedNotchMappings != null && projectNotchMappings != null
-                        && inheritedNode.mcVersion == projectNode.mcVersion) {
+                } else if (inheritedNode.mcVersion == projectNode.mcVersion) {
                     Pair(
                         bakeNamedToOfficialMappings(prepareSourceTaskName, inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg),
                         bakeNamedToOfficialMappings(prepareDestTaskName, projectNotchMappings, projectIntermediaryMappings, destinationSrg),
@@ -339,7 +337,7 @@ private fun readMappings(format: String, path: Path): MappingSet {
     }
 }
 
-private val Project.intermediaryMappings: Mappings?
+private val Project.intermediaryMappings: Mappings
     get() {
         project.tasks.findByName("genSrgs")?.let { // FG2
             return Mappings("searge", it.property("mcpToSrg") as File, "srg", listOf(it))
@@ -353,19 +351,18 @@ private val Project.intermediaryMappings: Mappings?
                 Mappings("searge", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
             }
         }
-        mappingsProvider?.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
+        mappingsProvider.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
             val file = (it as Path).toFile()
             if (file.exists()) {
                 return Mappings("searge", file, "tiny", emptyList())
             }
         }
-        tinyMappings?.let { return Mappings("yarn", it, "tiny", emptyList()) }
-        return null
+        return Mappings("yarn", tinyMappings, "tiny", emptyList())
     }
 
 data class Mappings(val type: String, val file: File, val format: String, val tasks: List<Task>)
 
-private val Project.notchMappings: Mappings?
+private val Project.notchMappings: Mappings
     get() {
         project.tasks.findByName("extractSrg")?.let { // FG3-5
             val output = it.property("output")
@@ -376,26 +373,28 @@ private val Project.notchMappings: Mappings?
                 Mappings("notch", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
             }
         }
-        tinyMappings?.let { return Mappings("notch", it, "tiny", emptyList()) }
-        return null
+        return Mappings("notch", tinyMappings, "tiny", emptyList())
     }
 
-private val Project.mappingsProvider: Any?
+private val Project.mappingsProvider: Any
     get() {
-        val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft") ?: return null
-        if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
+        val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft")
+            ?: throw UnsupportedLoom("Expected `loom` or `minecraft` extension")
+        if (!extension.javaClass.name.contains("LoomGradleExtension")) {
+            throw UnsupportedLoom("Unexpected extension class name: ${extension.javaClass.name}")
+        }
         listOf(
             "mappingConfiguration", // Fabric Loom 1.1+
             "mappingsProvider", // Fabric Loom pre 1.1
         ).forEach { pro ->
             extension.maybeGetGroovyProperty(pro)?.also { return it }
         }
-        return null
+        throw UnsupportedLoom("Failed to find mappings provider")
     }
 
-private val Project.tinyMappings: File?
+private val Project.tinyMappings: File
     get() {
-        val mappingsProvider = mappingsProvider ?: return null
+        val mappingsProvider = mappingsProvider
         mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
         mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.also {
             when (it) {
@@ -403,7 +402,7 @@ private val Project.tinyMappings: File?
                 is Path -> return it.toFile() // loom 0.10.17
             }
         }
-        throw GradleException("loom version not supported by preprocess plugin")
+        throw UnsupportedLoom("Failed to find tiny mappings file")
     }
 
 private val Task.classpath: FileCollection?
@@ -418,5 +417,7 @@ private val Task.classpath: FileCollection?
             throw RuntimeException(ex)
         }
     }
+
+private class UnsupportedLoom(msg: String) : GradleException("Loom version not supported by preprocess plugin: $msg")
 
 private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)
