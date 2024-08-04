@@ -134,6 +134,10 @@ class PreprocessPlugin : Plugin<Project> {
             }
 
             project.afterEvaluate {
+                if ("genSrgs" in project.tasks.names || "createMcpToSrg" in project.tasks.names) {
+                    logger.warn("ForgeGradle compatibility in Preprocessor is deprecated." +
+                        "Consider switching to architectury-loom (or essential-loom for FG2).")
+                }
                 val prepareTaskName = "prepareMappingsForPreprocessor"
                 val prepareSourceTaskName = "prepareSourceMappingsForPreprocessor"
                 val prepareDestTaskName = "prepareDestMappingsForPreprocessor"
