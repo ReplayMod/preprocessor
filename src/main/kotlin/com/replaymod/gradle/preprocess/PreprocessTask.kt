@@ -633,12 +633,12 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
         }
     }
 
-    private val String.indentation: Int
-        get() = takeWhile { it == ' ' }.length
+    private val String.indentation: String
+        get() = takeWhile { it == ' ' || it == '\t' }
 
     fun convertSource(kws: Keywords, lines: List<String>, remapped: List<Pair<String, List<String>>>, fileName: String): List<String> {
         val stack = mutableListOf<IfStackEntry>()
-        val indentStack = mutableListOf<Int>()
+        val indentStack = mutableListOf<String>()
         var active = true
         var remapActive = true
         var n = 0
@@ -741,15 +741,15 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                 } else {
                     val currIndent = indentStack.peek()!!
                     if (trimmed.isEmpty()) {
-                        " ".repeat(currIndent) + kws.eval
-                    } else if (!trimmed.startsWith(kws.eval) && currIndent <= line.indentation) {
+                        currIndent + kws.eval
+                    } else if (!trimmed.startsWith(kws.eval) && currIndent.length <= line.indentation.length) {
                         // Line has been disabled, so we want to use its non-remapped content instead.
                         // For one, the remapped content would be useless anyway since it's commented out
                         // and, more importantly, if we do not preserve it, we might permanently loose it as the
                         // remap process is only guaranteed to work on code which compiles and since we're
                         // just about to comment it out, it probably doesn't compile.
                         ignoreErrors = true
-                        " ".repeat(currIndent) + kws.eval + " " + originalLine.substring(currIndent)
+                        currIndent + kws.eval + " " + originalLine.substring(currIndent.length)
                     } else {
                         line
                     }
