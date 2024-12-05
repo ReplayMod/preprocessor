@@ -214,7 +214,7 @@ class PreprocessPlugin : Plugin<Project> {
 
                 from(project.file("src"))
                 from(project.layout.buildDirectory.dir("preprocessed"))
-                into(project.layout.projectDirectory.dir("src"))
+                into(project.parent!!.layout.projectDirectory.dir("src"))
 
                 project.the<SourceSetContainer>().all {
                     val cName = if (name == "main") "" else name.uppercaseFirstChar()
