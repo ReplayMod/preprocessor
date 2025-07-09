@@ -93,6 +93,9 @@ class PreprocessorTests : FunSpec({
                 "t || f && t || f".evalExpr().shouldBeTrue()
                 "f || f && t || f".evalExpr().shouldBeFalse()
             }
+            test("should allow underscore in numbers") {
+                "1_19_02 == 11902".evalExpr().shouldBeTrue()
+            }
             test("unknown variables should throw") {
                 shouldThrow<NoSuchElementException> { "invalid == 0".evalExpr() }
             }

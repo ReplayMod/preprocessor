@@ -595,7 +595,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
 
     var fail = false
 
-    private fun String.evalVarOrNull() = toIntOrNull() ?: vars[this]
+    private fun String.evalVarOrNull() = replace("_", "").toIntOrNull() ?: vars[this]
     private fun String.evalVar() = evalVarOrNull() ?: throw NoSuchElementException(this)
 
     internal fun String.evalExpr(): Boolean {
