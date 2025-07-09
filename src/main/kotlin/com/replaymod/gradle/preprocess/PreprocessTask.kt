@@ -595,7 +595,19 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
 
     var fail = false
 
-    private fun String.evalVarOrNull() = replace("_", "").toIntOrNull() ?: vars[this]
+    private fun String.evalVarOrNull(): Int? {
+        vars[this]?.let { return it }
+
+        if ("." in this) {
+            val (majorS, minorS, patchS) = this.split(".") + listOf("0")
+            val major = majorS.toIntOrNull() ?: return null
+            val minor = minorS.toIntOrNull() ?: return null
+            val patch = patchS.toIntOrNull() ?: return null
+            return major * 1_00_00 + minor * 1_00 + patch
+        }
+
+        return replace("_", "").toIntOrNull()
+    }
     private fun String.evalVar() = evalVarOrNull() ?: throw NoSuchElementException(this)
 
     internal fun String.evalExpr(): Boolean {

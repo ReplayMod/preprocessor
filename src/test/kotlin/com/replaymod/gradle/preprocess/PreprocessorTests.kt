@@ -96,6 +96,14 @@ class PreprocessorTests : FunSpec({
             test("should allow underscore in numbers") {
                 "1_19_02 == 11902".evalExpr().shouldBeTrue()
             }
+            test("should desugar dot-separated version literals") {
+                "1.19.02 == 11902".evalExpr().shouldBeTrue()
+                "1.19.2 == 11902".evalExpr().shouldBeTrue()
+                "1.19 == 11900".evalExpr().shouldBeTrue()
+                "1.8.9 == 10809".evalExpr().shouldBeTrue()
+                "1.8 == 10800".evalExpr().shouldBeTrue()
+                "1.7.10 == 10710".evalExpr().shouldBeTrue()
+            }
             test("unknown variables should throw") {
                 shouldThrow<NoSuchElementException> { "invalid == 0".evalExpr() }
             }
