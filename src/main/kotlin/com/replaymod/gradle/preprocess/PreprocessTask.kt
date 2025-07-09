@@ -12,6 +12,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileTree
 import org.gradle.api.file.FileCollection
+import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.*
 import org.gradle.kotlin.dsl.mapProperty
 import org.gradle.kotlin.dsl.property
@@ -24,6 +25,7 @@ import java.io.Serializable
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.regex.Pattern
+import javax.inject.Inject
 
 data class Keywords(
         val disableRemap: String,
@@ -37,7 +39,9 @@ data class Keywords(
 ) : Serializable
 
 @CacheableTask
-open class PreprocessTask : DefaultTask() {
+open class PreprocessTask @Inject constructor(
+    private val objects: ObjectFactory,
+) : DefaultTask() {
     companion object {
         @JvmStatic
         val DEFAULT_KEYWORDS = Keywords(
@@ -78,14 +82,14 @@ open class PreprocessTask : DefaultTask() {
     @SkipWhenEmpty
     @PathSensitive(PathSensitivity.RELATIVE)
     fun getSourceFileTrees(): List<ConfigurableFileTree> {
-        return entries.flatMap { it.source }.map { project.fileTree(it) }
+        return entries.flatMap { it.source }.map { objects.fileTree().from(it) }
     }
 
     @InputFiles
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
     fun getOverwritesFileTrees(): List<ConfigurableFileTree> {
-        return entries.mapNotNull { it.overwrites?.let(project::fileTree) }
+        return entries.mapNotNull { it.overwrites }.map { objects.fileTree().from(it) }
     }
 
     @OutputDirectories
@@ -106,10 +110,10 @@ open class PreprocessTask : DefaultTask() {
     // Note: Requires that source and destination mappings files to be in `tiny` format.
     @Input
     @Optional // required if source or destination mappings have more than two namespaces (optional for backwards compat)
-    val intermediateMappingsName = project.objects.property<String>()
+    val intermediateMappingsName = objects.property<String>()
 
     @Input
-    val strictExtraMappings = project.objects.property<Boolean>().convention(false)
+    val strictExtraMappings = objects.property<Boolean>().convention(false)
 
     @InputFile
     @Optional
@@ -122,12 +126,12 @@ open class PreprocessTask : DefaultTask() {
     @InputDirectory
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
-    val jdkHome = project.objects.directoryProperty()
+    val jdkHome = objects.directoryProperty()
 
     @InputDirectory
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
-    val remappedjdkHome = project.objects.directoryProperty()
+    val remappedjdkHome = objects.directoryProperty()
 
     @InputFiles
     @Optional
@@ -140,18 +144,18 @@ open class PreprocessTask : DefaultTask() {
     var remappedClasspath: FileCollection? = null
 
     @Input
-    val vars = project.objects.mapProperty<String, Int>()
+    val vars = objects.mapProperty<String, Int>()
 
     @Input
-    val keywords = project.objects.mapProperty<String, Keywords>()
-
-    @Input
-    @Optional
-    val patternAnnotation = project.objects.property<String>()
+    val keywords = objects.mapProperty<String, Keywords>()
 
     @Input
     @Optional
-    val manageImports = project.objects.property<Boolean>()
+    val patternAnnotation = objects.property<String>()
+
+    @Input
+    @Optional
+    val manageImports = objects.property<Boolean>()
 
     fun entry(source: FileCollection, generated: File, overwrites: File) {
         entries.add(InOut(source, generated, overwrites))
