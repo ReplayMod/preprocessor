@@ -202,7 +202,10 @@ open class PreprocessTask : DefaultTask() {
                     } catch (e: Exception) {
                         throw GradleException("Failed to parse $file: ${e.message}", e)
                     }
-                } ?: MemoryMappingTree().apply { visitNamespaces("source", listOf("destination")) }
+                } ?: MemoryMappingTree().apply {
+                    visitNamespaces("source", listOf("destination"))
+                    visitEnd()
+                }
                 val mrgTree = mergeMappings(srcTree, dstTree, extTree, sharedMappingsNamespace)
                 TinyReader(mrgTree, "source", "destination").read()
             } else {
@@ -582,6 +585,7 @@ open class PreprocessTask : DefaultTask() {
             mrgTree.visitDstName(MappedElementKind.CLASS, 0, extCls.getName(extDstNsId))
             injectExtraMembers(extCls)
         }
+        mrgTree.visitEnd()
         return mrgTree
     }
 }
