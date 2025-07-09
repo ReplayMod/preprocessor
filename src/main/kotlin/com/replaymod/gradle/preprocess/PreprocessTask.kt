@@ -610,6 +610,10 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
             }
         }
 
+        if (startsWith("!")) {
+            return !substring(1).evalExpr()
+        }
+
         val result = evalVarOrNull()
         if (result != null) {
             return result != 0

@@ -23,6 +23,13 @@ class PreprocessorTests : FunSpec({
                 "t".evalExpr().shouldBeTrue()
                 "f".evalExpr().shouldBeFalse()
             }
+            test("negation") {
+                "!zero".evalExpr().shouldBeTrue()
+                "!one".evalExpr().shouldBeFalse()
+                "!two".evalExpr().shouldBeFalse()
+                "!t".evalExpr().shouldBeFalse()
+                "!f".evalExpr().shouldBeTrue()
+            }
             test("a == b") {
                 "one == 0".evalExpr().shouldBeFalse()
                 "one == 1".evalExpr().shouldBeTrue()
