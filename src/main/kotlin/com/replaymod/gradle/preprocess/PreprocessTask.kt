@@ -169,7 +169,7 @@ open class PreprocessTask : DefaultTask() {
             val overwritesBasePath = inOut.overwrites?.toPath()
             inOut.source.flatMap { inBase ->
                 val inBasePath = inBase.toPath()
-                project.fileTree(inBase).map { file ->
+                inBase.walk().filter { it.isFile }.map { file ->
                     val relPath = inBasePath.relativize(file.toPath())
                     Entry(relPath.toString(), inBasePath, outBasePath, overwritesBasePath)
                 }
@@ -296,7 +296,7 @@ open class PreprocessTask : DefaultTask() {
             }
             val overwritesFiles = entries
                 .mapNotNull { it.overwrites }
-                .flatMap { base -> project.fileTree(base).map { Pair(base.toPath(), it) } }
+                .flatMap { base -> base.walk().filter { it.isFile }.map { Pair(base.toPath(), it) } }
             overwritesFiles.forEach { (base, file) ->
                 if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
                     val relPath = base.relativize(file.toPath())
@@ -306,7 +306,7 @@ open class PreprocessTask : DefaultTask() {
             mappedSources = javaTransformer.remap(sources, processedSources)
         }
 
-        project.delete(entries.map { it.generated })
+        entries.forEach { it.generated.deleteRecursively() }
 
         val commentPreprocessor = CommentPreprocessor(vars.get())
         sourceFiles.forEach { (relPath, inBase, outBase, overwritesPath) ->
@@ -328,10 +328,8 @@ open class PreprocessTask : DefaultTask() {
                 }
                 commentPreprocessor.convertFile(kws.value, file, outFile, javaTransform)
             } else {
-                project.copy {
-                    from(file)
-                    into(outFile.parentFile)
-                }
+                outFile.parentFile.mkdirs()
+                file.copyTo(outFile)
             }
         }
 
