@@ -9,6 +9,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
+import org.gradle.api.artifacts.Configuration
 import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
@@ -25,6 +26,8 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.stream.Collectors
+import kotlin.io.path.name
+import kotlin.io.path.toPath
 
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -48,6 +51,7 @@ class PreprocessPlugin : Plugin<Project> {
         val ext = project.extensions.create("preprocess", PreprocessExtension::class, project.objects, mcVersion)
 
         val kotlin = project.plugins.hasPlugin("kotlin")
+        val remapKotlinCompilerClasspath = setupKotlinCompilerClasspath(project)
 
         if (coreProject == project.name) {
             project.the<SourceSetContainer>().configureEach {
@@ -104,6 +108,7 @@ class PreprocessPlugin : Plugin<Project> {
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
                     manageImports.convention(ext.manageImports)
+                    compiler.from(remapKotlinCompilerClasspath)
                 }
                 val sourceJavaTask = project.tasks.findByName("source${name.uppercaseFirstChar()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessCode)
@@ -281,6 +286,32 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
         }
+    }
+
+    private fun setupKotlinCompilerClasspath(project: Project): Configuration {
+        val remapKotlinCompiler by project.configurations.creating
+        val remapKotlinCompilerClasspath by project.configurations.creating {
+            extendsFrom(remapKotlinCompiler)
+        }
+
+        var appliedKotlinGradlePluginVersion: String? = null
+        project.pluginManager.withPlugin("kotlin") {
+            try {
+                // Hack to find the version of the applied Kotlin Gradle Plugin so we can by default use the same
+                // version with remap
+                appliedKotlinGradlePluginVersion = project.plugins.getPlugin("kotlin")
+                    .javaClass.protectionDomain.codeSource.location.toURI().toPath()
+                    .parent.parent.name
+            } catch (e: Exception) {
+                project.logger.error("Failed to determine version of applied Kotlin plugin, falling back to $KOTLIN_COMPILER_VERSION.")
+            }
+        }
+        project.afterEvaluate {
+            val version = appliedKotlinGradlePluginVersion ?: KOTLIN_COMPILER_VERSION
+            project.dependencies.add(remapKotlinCompiler.name, "$KOTLIN_COMPILER_EMBEDDABLE:$version")
+        }
+
+        return remapKotlinCompilerClasspath
     }
 }
 
@@ -482,3 +513,6 @@ private fun Provider<Directory>.dir(path: String): Provider<Directory> =
 private fun String.uppercaseFirstChar() = replaceFirstChar { it.uppercaseChar() }
 
 private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)
+
+private const val KOTLIN_COMPILER_EMBEDDABLE = "org.jetbrains.kotlin:kotlin-compiler-embeddable"
+private const val KOTLIN_COMPILER_VERSION = "2.2.0"

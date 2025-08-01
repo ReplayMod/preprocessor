@@ -11,12 +11,21 @@ import org.cadixdev.lorenz.MappingSet
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileTree
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileCollection
+import org.gradle.api.logging.Logging
 import org.gradle.api.model.ObjectFactory
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.MapProperty
+import org.gradle.api.provider.Property
 import org.gradle.api.tasks.*
 import org.gradle.kotlin.dsl.mapProperty
+import org.gradle.kotlin.dsl.newInstance
 import org.gradle.kotlin.dsl.property
-import org.slf4j.LoggerFactory
+import org.gradle.kotlin.dsl.submit
+import org.gradle.workers.WorkAction
+import org.gradle.workers.WorkParameters
+import org.gradle.workers.WorkerExecutor
 import java.io.File
 import java.io.Serializable
 import java.nio.file.Files
@@ -38,6 +47,7 @@ data class Keywords(
 @CacheableTask
 open class PreprocessTask @Inject constructor(
     private val objects: ObjectFactory,
+    private val workerExecutor: WorkerExecutor,
 ) : DefaultTask() {
     companion object {
         @JvmStatic
@@ -62,8 +72,6 @@ open class PreprocessTask @Inject constructor(
                 endif = "##endif",
                 eval = "#$$"
         )
-
-        private val LOGGER = LoggerFactory.getLogger(PreprocessTask::class.java)
     }
 
     data class InOut(
@@ -154,6 +162,9 @@ open class PreprocessTask @Inject constructor(
     @Optional
     val manageImports = objects.property<Boolean>()
 
+    @Classpath
+    val compiler = objects.fileCollection()
+
     fun entry(source: FileCollection, generated: File, overwrites: File) {
         entries.add(InOut(source, generated, overwrites))
     }
@@ -163,7 +174,86 @@ open class PreprocessTask @Inject constructor(
         preprocess(mapping, entries)
     }
 
-    fun preprocess(mapping: File?, entries: List<InOut>) {
+    fun preprocess(mappingIn: File?, entriesIn: List<InOut>) {
+        val workQueue = if (compiler.isEmpty) {
+            workerExecutor.noIsolation()
+        } else {
+            workerExecutor.classLoaderIsolation {
+                classpath.from(compiler)
+            }
+        }
+
+        workQueue.submit(PreprocessAction::class) {
+            entries.set(entriesIn.map { entry ->
+                objects.newInstance(PreprocessParameters.InOut::class).apply {
+                    source.set(entry.source)
+                    generated.set(entry.generated)
+                    overwrites.set(entry.overwrites)
+                }
+            })
+            sourceMappings.set(this@PreprocessTask.sourceMappings)
+            destinationMappings.set(this@PreprocessTask.destinationMappings)
+            intermediateMappingsName.set(this@PreprocessTask.intermediateMappingsName)
+            strictExtraMappings.set(this@PreprocessTask.strictExtraMappings)
+            mapping.set(mappingIn)
+            reverseMapping.set(this@PreprocessTask.reverseMapping)
+            jdkHome.set(this@PreprocessTask.jdkHome)
+            remappedjdkHome.set(this@PreprocessTask.remappedjdkHome)
+            classpath.set(this@PreprocessTask.classpath)
+            remappedClasspath.set(this@PreprocessTask.remappedClasspath)
+            vars.set(this@PreprocessTask.vars)
+            keywords.set(this@PreprocessTask.keywords)
+            patternAnnotation.set(this@PreprocessTask.patternAnnotation)
+            manageImports.set(this@PreprocessTask.manageImports)
+        }
+    }
+}
+
+internal interface PreprocessParameters : WorkParameters {
+    interface InOut {
+        val source: Property<FileCollection>
+        val generated: Property<File>
+        val overwrites: Property<File> // optional
+    }
+    val entries: ListProperty<InOut>
+    val sourceMappings: Property<File> // optional
+    val destinationMappings: Property<File> // optional
+    val intermediateMappingsName: Property<String> // optional depending on other properties
+    val strictExtraMappings: Property<Boolean>
+    val mapping: Property<File> // optional
+    val reverseMapping: Property<Boolean>
+    val jdkHome: DirectoryProperty // optional
+    val remappedjdkHome: DirectoryProperty // optional
+    val classpath: Property<FileCollection> // optional
+    val remappedClasspath: Property<FileCollection> // optional
+    val vars: MapProperty<String, Int>
+    val keywords: MapProperty<String, Keywords>
+    val patternAnnotation: Property<String> // optional
+    val manageImports: Property<Boolean> // optional
+}
+
+private val LOGGER = Logging.getLogger(PreprocessTask::class.java)
+
+internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
+    override fun execute() {
+        val logger = LOGGER
+        val params = parameters
+        val entries = params.entries.get().map { PreprocessTask.InOut(it.source.get(), it.generated.get(), it.overwrites.orNull) }
+        val sourceMappings = params.sourceMappings.orNull
+        val destinationMappings = params.destinationMappings.orNull
+        val intermediateMappingsName = params.intermediateMappingsName
+        val strictExtraMappings = params.strictExtraMappings
+        val mapping = params.mapping.orNull
+        val reverseMapping = params.reverseMapping.get()
+        val jdkHome = params.jdkHome
+        val remappedjdkHome = params.remappedjdkHome
+        val classpath = params.classpath.orNull
+        val remappedClasspath = params.remappedClasspath.orNull
+        val vars = params.vars
+        val keywords = params.keywords
+        val patternAnnotation = params.patternAnnotation
+        val manageImports = params.manageImports
+
         data class Entry(val relPath: String, val inBase: Path, val outBase: Path, val overwritesBase: Path?)
         val sourceFiles: List<Entry> = entries.flatMap { inOut ->
             val outBasePath = inOut.generated.toPath()
@@ -179,7 +269,6 @@ open class PreprocessTask @Inject constructor(
 
         var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
 
-        val classpath = classpath
         val sourceMappingsFile = sourceMappings
         val destinationMappingsFile = destinationMappings
         val mappings = if (intermediateMappingsName.isPresent && classpath != null && sourceMappingsFile != null && destinationMappingsFile != null) {
@@ -511,7 +600,7 @@ open class PreprocessTask @Inject constructor(
                 val srcName = extField.getName(extSrcNsId)
                 val srcDesc = extField.getDesc(extSrcNsId)
                 if (srcDesc == null) {
-                    logger.error("Owner ${extCls.getName(extSrcNsId)} of field $srcName does not appear to have any mappings. " +
+                    LOGGER.error("Owner ${extCls.getName(extSrcNsId)} of field $srcName does not appear to have any mappings. " +
                         "As such, you must provide the full signature of this method manually " +
                         "(if it does not change across versions, providing it for either version is sufficient).")
                     continue
@@ -523,7 +612,7 @@ open class PreprocessTask @Inject constructor(
                 val srcName = extMethod.getName(extSrcNsId)
                 val srcDesc = extMethod.getDesc(extSrcNsId)
                 if (srcDesc == null) {
-                    logger.error("Owner ${extCls.getName(extSrcNsId)} of method $srcName does not appear to have any mappings. " +
+                    LOGGER.error("Owner ${extCls.getName(extSrcNsId)} of method $srcName does not appear to have any mappings. " +
                         "As such, you must provide the full signature of this method manually " +
                         "(if it does not change across versions, providing it for either version is sufficient).")
                     continue
