@@ -16,9 +16,6 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.*
 import org.gradle.kotlin.dsl.mapProperty
 import org.gradle.kotlin.dsl.property
-import org.jetbrains.kotlin.backend.common.peek
-import org.jetbrains.kotlin.backend.common.pop
-import org.jetbrains.kotlin.backend.common.push
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.Serializable
@@ -761,7 +758,7 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
                         originalLine
                     }
                 } else {
-                    val currIndent = indentStack.peek()!!
+                    val currIndent = indentStack.last()
                     if (trimmed.isEmpty()) {
                         currIndent + kws.eval
                     } else if (!trimmed.startsWith(kws.eval) && currIndent.length <= line.indentation.length) {
@@ -817,3 +814,6 @@ class CommentPreprocessor(private val vars: Map<String, Int>) {
 
     class ParserException(str: String) : RuntimeException(str)
 }
+
+private fun <E> MutableList<E>.push(e: E) = add(e)
+private fun <E> MutableList<E>.pop() = removeLast()
