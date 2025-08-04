@@ -323,7 +323,7 @@ internal abstract class BakeNamedToOfficialMappings : DefaultTask() {
 
     @get:Nested
     @get:Optional
-    abstract val namedToIntermediaryMappings: Property<MappingsFile?>
+    abstract val namedToIntermediaryMappings: Property<MappingsFile>
 
     @get:OutputFile
     abstract val output: RegularFileProperty
@@ -354,12 +354,12 @@ private fun Project.bakeNamedToIntermediaryMappings(name: String, namedToInterme
     return task
 }
 
-private fun Project.bakeNamedToOfficialMappings(name: String, mappings: Mappings, namedToIntermediaryMappings: Mappings?, destination: File): TaskProvider<BakeNamedToOfficialMappings> {
+private fun Project.bakeNamedToOfficialMappings(name: String, mappings: Mappings, namedToIntermediaryMappings: Mappings, destination: File): TaskProvider<BakeNamedToOfficialMappings> {
     val task = tasks.register(name, BakeNamedToOfficialMappings::class)
     task.configure {
-        dependsOn(mappings.tasks, namedToIntermediaryMappings?.tasks)
+        dependsOn(mappings.tasks, namedToIntermediaryMappings.tasks)
         this.mappings.set(mappings.toFile())
-        this.namedToIntermediaryMappings.set(namedToIntermediaryMappings?.toFile())
+        this.namedToIntermediaryMappings.set(namedToIntermediaryMappings.toFile())
         output.set(destination)
     }
     return task
