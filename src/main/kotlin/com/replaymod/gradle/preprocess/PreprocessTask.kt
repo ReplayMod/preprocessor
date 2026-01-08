@@ -30,6 +30,7 @@ import java.io.File
 import java.io.Serializable
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.function.Consumer
 import java.util.regex.Pattern
 import javax.inject.Inject
 
@@ -184,6 +185,7 @@ open class PreprocessTask @Inject constructor(
         }
 
         workQueue.submit(PreprocessAction::class) {
+            compiler.set(this@PreprocessTask.compiler)
             entries.set(entriesIn.map { entry ->
                 objects.newInstance(PreprocessParameters.InOut::class).apply {
                     source.set(entry.source)
@@ -210,6 +212,8 @@ open class PreprocessTask @Inject constructor(
 }
 
 internal interface PreprocessParameters : WorkParameters {
+    val compiler: Property<FileCollection>
+
     interface InOut {
         val source: Property<FileCollection>
         val generated: Property<File>
@@ -236,8 +240,49 @@ private val LOGGER = Logging.getLogger(PreprocessTask::class.java)
 
 internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
     override fun execute() {
+        val compiler = parameters.compiler.get()
+        if (compiler.isEmpty) {
+            PreprocessActionImpl().accept(parameters)
+        } else {
+            executeIsolated(compiler)
+        }
+    }
+
+    // Work around for https://github.com/gradle/gradle/issues/34442
+    private fun executeIsolated(compilerClasspath: FileCollection) {
+        val fullClasspath =
+            compilerClasspath.files.map { it.toURI().toURL() } + listOf(
+                PreprocessActionImpl::class.java,
+                Transformer::class.java,
+            ).map { it.protectionDomain.codeSource.location }
+
+        LOGGER.debug("Remap IsolatedClassLoader classpath:")
+        fullClasspath.forEach { LOGGER.debug(" - {}", it) }
+
+        val classLoader = IsolatedClassLoader(
+            fullClasspath.toTypedArray(),
+            javaClass.classLoader,
+            exclusions = listOf(
+                "org.gradle.",
+                "net.fabricmc.mappingio.",
+                "org.cadixdev.lorenz.",
+                "org.cadixdev.bombe.",
+                PreprocessParameters::class.java.name,
+                Keywords::class.java.name,
+            ),
+        )
+
+        val implClass = classLoader.loadClass(PreprocessActionImpl::class.java.name)
+        val implInstance = implClass.constructors.first().apply { isAccessible = true }.newInstance()
+
+        @Suppress("UNCHECKED_CAST")
+        (implInstance as Consumer<PreprocessParameters>).accept(parameters)
+    }
+}
+
+private class PreprocessActionImpl : Consumer<PreprocessParameters> {
+    override fun accept(params: PreprocessParameters) {
         val logger = LOGGER
-        val params = parameters
         val entries = params.entries.get().map { PreprocessTask.InOut(it.source.get(), it.generated.get(), it.overwrites.orNull) }
         val sourceMappings = params.sourceMappings.orNull
         val destinationMappings = params.destinationMappings.orNull
