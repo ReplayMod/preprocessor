@@ -28,6 +28,7 @@ import org.gradle.workers.WorkParameters
 import org.gradle.workers.WorkerExecutor
 import java.io.File
 import java.io.Serializable
+import java.lang.ref.SoftReference
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.function.Consumer
@@ -179,9 +180,11 @@ open class PreprocessTask @Inject constructor(
         val workQueue = if (compiler.isEmpty) {
             workerExecutor.noIsolation()
         } else {
-            workerExecutor.classLoaderIsolation {
-                classpath.from(compiler)
-            }
+            // See comment on `executeIsolated` below
+            workerExecutor.noIsolation()
+            //workerExecutor.classLoaderIsolation {
+            //    classpath.from(compiler)
+            //}
         }
 
         workQueue.submit(PreprocessAction::class) {
@@ -249,6 +252,10 @@ internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
     }
 
     // Work around for https://github.com/gradle/gradle/issues/34442
+    // Additionally, it seems that Gradle's classpath isolated work queue doesn't re-use class loaders even when the
+    // classpath is unchanged, which is really bad for performance (like 7x slowdown) in our case, since we're loading
+    // the whole Kotlin compiler (and it may internally cache various stuff as well).
+    // So instead we'll completely disable Gradle's isolation and do our own caching.
     private fun executeIsolated(compilerClasspath: FileCollection) {
         val fullClasspath =
             compilerClasspath.files.map { it.toURI().toURL() } + listOf(
@@ -259,24 +266,32 @@ internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
         LOGGER.debug("Remap IsolatedClassLoader classpath:")
         fullClasspath.forEach { LOGGER.debug(" - {}", it) }
 
-        val classLoader = IsolatedClassLoader(
-            fullClasspath.toTypedArray(),
-            javaClass.classLoader,
-            exclusions = listOf(
-                "org.gradle.",
-                "net.fabricmc.mappingio.",
-                "org.cadixdev.lorenz.",
-                "org.cadixdev.bombe.",
-                PreprocessParameters::class.java.name,
-                Keywords::class.java.name,
-            ),
-        )
+        val cacheKey = fullClasspath.map { it.toString() } // URL has bad `equals`; its `toString` is good enough for us
+        val classLoader = synchronized(cache) {
+            cache.values.removeIf { it.get() == null }
+            cache[cacheKey]?.get() ?: IsolatedClassLoader(
+                fullClasspath.toTypedArray(),
+                javaClass.classLoader,
+                exclusions = listOf(
+                    "org.gradle.",
+                    "net.fabricmc.mappingio.",
+                    "org.cadixdev.lorenz.",
+                    "org.cadixdev.bombe.",
+                    PreprocessParameters::class.java.name,
+                    Keywords::class.java.name,
+                ),
+            ).also { cache[cacheKey] = SoftReference(it) }
+        }
 
         val implClass = classLoader.loadClass(PreprocessActionImpl::class.java.name)
         val implInstance = implClass.constructors.first().apply { isAccessible = true }.newInstance()
 
         @Suppress("UNCHECKED_CAST")
         (implInstance as Consumer<PreprocessParameters>).accept(parameters)
+    }
+
+    companion object {
+        private val cache = mutableMapOf<List<String>, SoftReference<IsolatedClassLoader>>()
     }
 }
 
