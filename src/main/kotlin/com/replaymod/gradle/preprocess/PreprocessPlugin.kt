@@ -1,5 +1,8 @@
 package com.replaymod.gradle.preprocess
 
+import net.fabricmc.loom.api.LoomGradleExtensionAPI
+import net.fabricmc.loom.configuration.providers.mappings.LayeredMappingSpecBuilderImpl
+import net.fabricmc.loom.configuration.providers.mappings.LayeredMappingsFactory
 import net.fabricmc.mappingio.MappingReader
 import net.fabricmc.mappingio.tree.MemoryMappingTree
 import org.cadixdev.lorenz.MappingSet
@@ -162,8 +165,29 @@ class PreprocessPlugin : Plugin<Project> {
                     val inheritedSrgMappings = inherited.tinyMappingsWithSrg
                     val projectTinyMappings = project.tinyMappings
                     val inheritedTinyMappings = inherited.tinyMappings
+                    val generatedMappingsFile = project.layout.buildDirectory.get().asFile.resolve("generatedIdentityMappings.tiny")
+                    val generatedMappingsTask = tasks.register("generateIdentityMappingsFromMinecraftJars", GenerateIdentityMappingsFromMinecraftJars::class) {
+                        minecraftJars.from(project.extensions.getByType<LoomGradleExtensionAPI>().namedMinecraftJars)
+                        output.set(generatedMappingsFile)
+                    }
                     tasks.withType<PreprocessTask>().configureEach {
-                        if ((inheritedSrgMappings != null) == (projectSrgMappings != null)) {
+                        if (projectTinyMappings == null && inheritedTinyMappings == null) {
+                            // Between two unobfuscated versions
+                            dependsOn(generatedMappingsTask)
+                            sourceMappings = generatedMappingsFile
+                            destinationMappings = generatedMappingsFile
+                            intermediateMappingsName.set("named")
+                        } else if (projectTinyMappings == null) {
+                            // We have source mappings, but target is unobfuscated
+                            sourceMappings = inheritedTinyMappings
+                            destinationMappings = inherited.mojangMappings
+                            intermediateMappingsName.set("official")
+                        } else if (inheritedTinyMappings == null) {
+                            // We have target mappings, but source is unobfuscated
+                            sourceMappings = project.mojangMappings
+                            destinationMappings = projectTinyMappings
+                            intermediateMappingsName.set("official")
+                        } else if ((inheritedSrgMappings != null) == (projectSrgMappings != null)) {
                             sourceMappings = inheritedSrgMappings ?: inheritedTinyMappings
                             destinationMappings = projectSrgMappings ?: projectTinyMappings
                             intermediateMappingsName.set(if (projectSrgMappings != null) "srg" else "intermediary")
@@ -430,7 +454,8 @@ private val Project.intermediaryMappings: Mappings
             }
         }
         tinyMappingsWithSrg?.let { return Mappings("searge", it, "tiny", emptyList()) }
-        return Mappings("yarn", tinyMappings, "tiny", emptyList())
+        tinyMappings?.let { Mappings("yarn", it, "tiny", emptyList()) }
+        throw UnsupportedOperationException("Mapping between ForgeGradle and unobfuscated versions is not supported.")
     }
 
 data class Mappings(val type: String, val file: File, val format: String, val tasks: List<Task>)
@@ -449,16 +474,25 @@ private val Project.notchMappings: Mappings?
                 Mappings("notch", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
             }
         }
-        return Mappings("notch", tinyMappings, "tiny", emptyList())
+        tinyMappings?.let { Mappings("notch", it, "tiny", emptyList()) }
+        throw UnsupportedOperationException("Mapping between ForgeGradle and unobfuscated versions is not supported.")
     }
 
-private val Project.mappingsProvider: Any
+private val Project.mappingsProvider: Any?
     get() {
         val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft")
             ?: throw UnsupportedLoom("Expected `loom` or `minecraft` extension")
         if (!extension.javaClass.name.contains("LoomGradleExtension")) {
             throw UnsupportedLoom("Unexpected extension class name: ${extension.javaClass.name}")
         }
+
+        // Fabric Loom 1.13
+        try {
+            if (extension.javaClass.getMethod("disableObfuscation").invoke(extension) == true) {
+                return null
+            }
+        } catch (_: NoSuchMethodException) {}
+
         listOf(
             "mappingConfiguration", // Fabric Loom 1.1+
             "mappingsProvider", // Fabric Loom pre 1.1
@@ -468,9 +502,9 @@ private val Project.mappingsProvider: Any
         throw UnsupportedLoom("Failed to find mappings provider")
     }
 
-private val Project.tinyMappings: File
+private val Project.tinyMappings: File?
     get() {
-        val mappingsProvider = mappingsProvider
+        val mappingsProvider = mappingsProvider ?: return null
         mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
         mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.also {
             when (it) {
@@ -483,13 +517,19 @@ private val Project.tinyMappings: File
 
 private val Project.tinyMappingsWithSrg: File?
     get() {
-        mappingsProvider.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
+        mappingsProvider?.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
             val file = (it as Path).toFile()
             if (file.exists()) {
                 return file
             }
         }
         return null
+    }
+
+private val Project.mojangMappings: File?
+    get() {
+        val factory = LayeredMappingsFactory(LayeredMappingSpecBuilderImpl.buildOfficialMojangMappings())
+        return factory.resolve(this).toFile()
     }
 
 private val Task.classpath: FileCollection?

@@ -58,6 +58,10 @@ dependencies {
         exclude("org.jetbrains.kotlin", "kotlin-compiler-embeddable")
     }
     implementation("net.fabricmc:mapping-io:0.6.1")
+    implementation("org.ow2.asm:asm:9.9.1")
+
+    compileOnly("net.fabricmc:fabric-loom:1.7.4")
+
     testImplementation("io.kotest:kotest-runner-junit5-jvm:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core-jvm:$kotestVersion")
 }
