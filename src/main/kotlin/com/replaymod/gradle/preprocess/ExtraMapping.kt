@@ -48,8 +48,8 @@ data class ExtraMapping(val entries: List<Entry>) {
     ): Pair<MemoryMappingTree, MemoryMappingTree> {
         val srcNamedNsId = srcTree.getNamespaceId(namedNamespace)
         val srcSharedNsId = srcTree.getNamespaceId(sharedNamespace)
-        val dstSharedNsId = srcTree.getNamespaceId(sharedNamespace)
-        val dstNamedNsId = srcTree.getNamespaceId(namedNamespace)
+        val dstSharedNsId = dstTree.getNamespaceId(sharedNamespace)
+        val dstNamedNsId = dstTree.getNamespaceId(namedNamespace)
 
         val internalEntries = entries.map { entry ->
             /** Turns `a.b.C.D` into `a/b/C$D`. */
