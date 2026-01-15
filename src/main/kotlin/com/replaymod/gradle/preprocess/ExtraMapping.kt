@@ -200,8 +200,8 @@ data class ExtraMapping(val entries: List<Entry>) {
             }
         }
 
-        val forwards = entriesToMappingTree(srcTree, namedNamespace, completedEntries)
-        val backwards = entriesToMappingTree(dstTree, namedNamespace, completedEntries.map { entry ->
+        val forwards = entriesToMappingTree(srcTree, dstTree, namedNamespace, sharedNamespace, completedEntries)
+        val backwards = entriesToMappingTree(dstTree, srcTree, namedNamespace, sharedNamespace, completedEntries.map { entry ->
             when (entry) {
                 is ClassEntry -> entry.copy(srcName = entry.dstName, dstName = entry.srcName)
                 is FieldEntry -> entry.copy(
@@ -225,10 +225,15 @@ data class ExtraMapping(val entries: List<Entry>) {
 
     private fun entriesToMappingTree(
         srcTree: MappingTree,
+        dstTree: MappingTree,
         namedNamespace: String,
+        sharedNamespace: String,
         completedEntries: List<Entry>,
     ): MemoryMappingTree {
         val srcNamedNsId = srcTree.getNamespaceId(namedNamespace)
+        val srcSharedNsId = srcTree.getNamespaceId(sharedNamespace)
+        val dstSharedNsId = dstTree.getNamespaceId(sharedNamespace)
+        val dstNamedNsId = dstTree.getNamespaceId(namedNamespace)
 
         val entriesBySrcClass = completedEntries.groupBy { entry ->
             when (entry) {
@@ -238,12 +243,22 @@ data class ExtraMapping(val entries: List<Entry>) {
             }
         }
 
+        fun findDstCls(srcName: String, entries: List<Entry>): String {
+            val extraClsMapping = entries.firstNotNullOfOrNull { (it as? ClassEntry)?.dstName }
+            if (extraClsMapping != null) {
+                return extraClsMapping
+            }
+            val srcCls = srcTree.getClass(srcName, srcNamedNsId) ?: return srcName
+            val sharedName = srcCls.getName(srcSharedNsId) ?: return srcName
+            val dstCls = dstTree.getClass(sharedName, dstSharedNsId) ?: return srcName
+            return dstCls.getName(dstNamedNsId)!!
+        }
+
         val result = MemoryMappingTree().apply { visitNamespaces("source", listOf("destination")) }
 
         for ((srcClsName, entries) in entriesBySrcClass) {
             result.visitClass(srcClsName)
-            val dstClsName = entries.firstNotNullOfOrNull { (it as? ClassEntry)?.dstName } ?: srcClsName
-            result.visitDstName(MappedElementKind.CLASS, 0, dstClsName)
+            result.visitDstName(MappedElementKind.CLASS, 0, findDstCls(srcClsName, entries))
 
             val srcCls = srcTree.getClass(srcClsName, srcNamedNsId)
 
