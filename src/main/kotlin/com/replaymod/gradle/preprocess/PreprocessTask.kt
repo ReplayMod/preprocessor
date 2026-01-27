@@ -215,6 +215,8 @@ open class PreprocessTask @Inject constructor(
             patternAnnotation.set(this@PreprocessTask.patternAnnotation)
             manageImports.set(this@PreprocessTask.manageImports)
         }
+
+        workQueue.await()
     }
 }
 
