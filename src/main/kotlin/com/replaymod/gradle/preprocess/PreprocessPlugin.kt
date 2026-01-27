@@ -14,13 +14,11 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.file.Directory
-import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.*
-import org.gradle.api.tasks.compile.AbstractCompile
 import org.gradle.api.tasks.compile.JavaCompile
 
 import org.gradle.kotlin.dsl.*
@@ -56,6 +54,13 @@ class PreprocessPlugin : Plugin<Project> {
         val kotlin = project.plugins.hasPlugin("kotlin")
         val remapKotlinCompilerClasspath = setupKotlinCompilerClasspath(project)
 
+        project.the<SourceSetContainer>().configureEach {
+            val compileClasspath = if (name == "main") "compileClasspath" else name + "CompileClasspath"
+            project.configurations.consumable("preprocess-outgoing-$compileClasspath") {
+                extendsFrom(project.configurations[compileClasspath])
+            }
+        }
+
         if (coreProject == project.name) {
             project.the<SourceSetContainer>().configureEach {
                 java.setSrcDirs(listOf(parent.file("src/$name/java")))
@@ -85,6 +90,15 @@ class PreprocessPlugin : Plugin<Project> {
                 val generatedJava = preprocessedRoot.dir("java")
                 val generatedResources = preprocessedRoot.dir("resources")
 
+                val compileClasspath = if (name == "main") "compileClasspath" else name + "CompileClasspath"
+                val incomingCompileClasspath = project.configurations.dependencyScope("preprocess-incoming-$compileClasspath")
+                val incomingCompileClasspathResolver = project.configurations.resolvable("${incomingCompileClasspath.name}-resolver") {
+                    extendsFrom(incomingCompileClasspath.get())
+                }
+                project.dependencies {
+                    incomingCompileClasspath(project(inherited.path, "preprocess-outgoing-$compileClasspath"))
+                }
+
                 val preprocessCode = project.tasks.register<PreprocessTask>("preprocess${cName}Code") {
                     inherited.tasks.findByPath("preprocess${cName}Code")?.let { dependsOn(it) }
                     entry(
@@ -103,8 +117,8 @@ class PreprocessPlugin : Plugin<Project> {
                     }
                     jdkHome.set((inherited.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
                     remappedjdkHome.set((project.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
-                    classpath = inherited.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"].classpath
-                    remappedClasspath = project.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"].classpath
+                    classpath = project.files(incomingCompileClasspathResolver)
+                    remappedClasspath = project.files(project.configurations[compileClasspath])
                     mapping = mappingFile
                     reverseMapping = reverseMappings
                     vars.convention(ext.vars)
@@ -530,19 +544,6 @@ private val Project.mojangMappings: File?
     get() {
         val factory = LayeredMappingsFactory(LayeredMappingSpecBuilderImpl.buildOfficialMojangMappings())
         return factory.resolve(this).toFile()
-    }
-
-private val Task.classpath: FileCollection?
-    get() = if (this is AbstractCompile) {
-        this.classpath
-    } else {
-        // assume kotlin 1.7+
-        try {
-            val classpathMethod = this.javaClass.getMethod("getLibraries")
-            classpathMethod.invoke(this) as FileCollection?
-        } catch (ex: Exception) {
-            throw RuntimeException(ex)
-        }
     }
 
 private class UnsupportedLoom(msg: String) : GradleException("Loom version not supported by preprocess plugin: $msg")
