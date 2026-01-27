@@ -283,6 +283,7 @@ internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
                     "net.fabricmc.mappingio.",
                     "org.cadixdev.lorenz.",
                     "org.cadixdev.bombe.",
+                    "org.objectweb.asm.",
                     PreprocessParameters::class.java.name,
                     Keywords::class.java.name,
                 ),
