@@ -26,6 +26,8 @@ data class ExtraMapping(val entries: List<Entry>) {
         val dstClsName: String?,
         val srcName: String,
         val dstName: String,
+        val srcDesc: String?,
+        val dstDesc: String?,
     ) : Entry
 
     data class MethodEntry(
@@ -120,8 +122,57 @@ data class ExtraMapping(val entries: List<Entry>) {
             when (entry) {
                 is ClassEntry -> listOf(entry)
                 is FieldEntry -> {
+                    val srcClsName = entry.srcClsName
                     val dstClsName = entry.dstClsName ?: findDstCls(entry, entry.srcClsName) ?: return@flatMap emptyList()
-                    listOf(entry.copy(dstClsName = dstClsName))
+
+                    val srcCls = srcTree.getClass(srcClsName, srcNamedNsId)
+                    val dstCls = dstTree.getClass(dstClsName, dstNamedNsId)
+
+                    val srcMappedDesc = entry.dstDesc?.let { clsTree.mapDesc(it, clsDstNsId, clsSrcNsId) }
+                    val dstMappedDesc = entry.srcDesc?.let { clsTree.mapDesc(it, clsSrcNsId, clsDstNsId) }
+
+                    if (entry.srcDesc != null || entry.dstDesc != null) {
+                        return@flatMap listOf(entry.copy(
+                            dstClsName = dstClsName,
+                            srcDesc = entry.srcDesc ?: srcMappedDesc!!,
+                            dstDesc = entry.dstDesc ?: dstMappedDesc!!,
+                        ))
+                    }
+
+                    if (srcCls == null && dstCls == null) {
+                        logger.error("Neither source nor target class of $entry appear to be mapped (or did you typo?). " +
+                                "As such, you must explicitly specify the field signature of at least one of them.")
+                        return@flatMap emptyList()
+                    }
+
+                    val srcFields = srcCls?.fields.orEmpty().filter { it.getName(srcNamedNsId) == entry.srcName }.toMutableList()
+                    val dstFields = dstCls?.fields.orEmpty().filter { it.getName(dstNamedNsId) == entry.dstName }.toMutableList()
+
+                    require(srcFields.size <= 1)
+                    require(dstFields.size <= 1)
+
+                    when {
+                        srcFields.isNotEmpty() && dstFields.isNotEmpty() -> listOf(entry.copy(
+                            dstClsName = dstClsName,
+                            srcDesc = srcFields.single().getDesc(srcNamedNsId),
+                            dstDesc = dstFields.single().getDesc(dstNamedNsId),
+                        ))
+                        srcFields.isNotEmpty() -> listOf(entry.copy(
+                            dstClsName = dstClsName,
+                            srcDesc = srcFields.single().getDesc(srcNamedNsId),
+                            dstDesc = clsTree.mapDesc(srcFields.single().getDesc(srcNamedNsId)!!, clsSrcNsId, clsDstNsId),
+                        ))
+                        dstFields.isNotEmpty() -> listOf(entry.copy(
+                            dstClsName = dstClsName,
+                            srcDesc = clsTree.mapDesc(dstFields.single().getDesc(dstNamedNsId)!!, clsDstNsId, clsSrcNsId),
+                            dstDesc = dstFields.single().getDesc(dstNamedNsId),
+                        ))
+                        else -> {
+                            logger.error("Neither source nor target field of $entry appear to be mapped (or did you typo?). " +
+                                    "As such, you must explicitly specify the field signature of at least one of them.")
+                            return@flatMap emptyList()
+                        }
+                    }
                 }
                 is MethodEntry -> {
                     val srcClsName = entry.srcClsName
@@ -209,6 +260,8 @@ data class ExtraMapping(val entries: List<Entry>) {
                     dstClsName = entry.srcClsName,
                     srcName = entry.dstName,
                     dstName = entry.srcName,
+                    srcDesc = entry.dstDesc,
+                    dstDesc = entry.srcDesc,
                 )
                 is MethodEntry -> entry.copy(
                     srcClsName = entry.dstClsName!!,
@@ -260,14 +313,11 @@ data class ExtraMapping(val entries: List<Entry>) {
             result.visitClass(srcClsName)
             result.visitDstName(MappedElementKind.CLASS, 0, findDstCls(srcClsName, entries))
 
-            val srcCls = srcTree.getClass(srcClsName, srcNamedNsId)
-
             for (entry in entries) {
                 when (entry) {
                     is ClassEntry -> {}
                     is FieldEntry -> {
-                        val srcField = srcCls?.getField(entry.srcName, null, srcNamedNsId)
-                        result.visitField(entry.srcName, srcField?.getDesc(srcNamedNsId))
+                        result.visitField(entry.srcName, entry.srcDesc)
                         result.visitDstName(MappedElementKind.FIELD, 0, entry.dstName)
                     }
                     is MethodEntry -> {
@@ -328,7 +378,11 @@ data class ExtraMapping(val entries: List<Entry>) {
                         dstName = dstName.substringBefore("(")
                         entries.add(MethodEntry(lineNumber, srcClsName, dstClsName, srcName, dstName, srcDesc, dstDesc))
                     } else {
-                        entries.add(FieldEntry(lineNumber, srcClsName, dstClsName, srcName, dstName))
+                        val srcDesc = if (":" in srcName) srcName.substringAfter(":") else null
+                        val dstDesc = if (":" in dstName) dstName.substringAfter(":") else null
+                        srcName = srcName.substringBefore(":")
+                        dstName = dstName.substringBefore(":")
+                        entries.add(FieldEntry(lineNumber, srcClsName, dstClsName, srcName, dstName, srcDesc, dstDesc))
                     }
                 } else {
                     throw IllegalArgumentException("Line $lineNumber: Expected 2-4 whitespace-separated identifiers, got ${parts.size}")

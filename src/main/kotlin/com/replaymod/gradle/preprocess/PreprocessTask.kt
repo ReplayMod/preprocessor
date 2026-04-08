@@ -680,7 +680,7 @@ private class PreprocessActionImpl : Consumer<PreprocessParameters> {
                 val srcDesc = extField.getDesc(extSrcNsId)
                 if (srcDesc == null) {
                     LOGGER.error("Owner ${extCls.getName(extSrcNsId)} of field $srcName does not appear to have any mappings. " +
-                        "As such, you must provide the full signature of this method manually " +
+                        "As such, you must provide the full signature of this field manually " +
                         "(if it does not change across versions, providing it for either version is sufficient).")
                     continue
                 }
