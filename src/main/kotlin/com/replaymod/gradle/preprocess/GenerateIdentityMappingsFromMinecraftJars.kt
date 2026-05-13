@@ -42,12 +42,6 @@ internal abstract class GenerateIdentityMappingsFromMinecraftJars : DefaultTask(
                 mappingTree.visitMethod(name, descriptor)
                 return super.visitMethod(access, name, descriptor, signature, exceptions)
             }
-
-            override fun visitEnd() {
-                super.visitEnd()
-
-                mappingTree.visitEnd()
-            }
         }
 
         for (minecraftJar in minecraftJars.files) {
@@ -63,6 +57,8 @@ internal abstract class GenerateIdentityMappingsFromMinecraftJars : DefaultTask(
                 }
             }
         }
+
+        mappingTree.visitEnd()
 
         output.get().asFile.bufferedWriter().use { writer ->
             mappingTree.accept(Tiny2FileWriter(writer, false))
