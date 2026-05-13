@@ -179,16 +179,20 @@ class PreprocessPlugin : Plugin<Project> {
                     val inheritedSrgMappings = inherited.tinyMappingsWithSrg
                     val projectTinyMappings = project.tinyMappings
                     val inheritedTinyMappings = inherited.tinyMappings
-                    val generatedMappingsTask = tasks.register("generateIdentityMappingsFromMinecraftJars", GenerateIdentityMappingsFromMinecraftJars::class) {
+                    val generateSourceMappingsTask = tasks.register("generateIdentityMappingsFromSourceMinecraftJars", GenerateIdentityMappingsFromMinecraftJars::class) {
+                        minecraftJars.from(inherited.extensions.getByType<LoomGradleExtensionAPI>().namedMinecraftJars)
+                        output.set(project.layout.buildDirectory.get().asFile.resolve("generatedSourceIdentityMappings.tiny"))
+                    }
+                    val generateDestinationMappingsTask = tasks.register("generateIdentityMappingsFromDestinationMinecraftJars", GenerateIdentityMappingsFromMinecraftJars::class) {
                         minecraftJars.from(project.extensions.getByType<LoomGradleExtensionAPI>().namedMinecraftJars)
-                        output.set(project.layout.buildDirectory.get().asFile.resolve("generatedIdentityMappings.tiny"))
+                        output.set(project.layout.buildDirectory.get().asFile.resolve("generatedDestinationIdentityMappings.tiny"))
                     }
                     tasks.withType<PreprocessTask>().configureEach {
                         if (projectTinyMappings == null && inheritedTinyMappings == null) {
                             // Between two unobfuscated versions
-                            dependsOn(generatedMappingsTask)
-                            sourceMappings = generatedMappingsTask.get().output.get().asFile
-                            destinationMappings = generatedMappingsTask.get().output.get().asFile
+                            dependsOn(generateSourceMappingsTask, generateDestinationMappingsTask)
+                            sourceMappings = generateSourceMappingsTask.get().output.get().asFile
+                            destinationMappings = generateDestinationMappingsTask.get().output.get().asFile
                             intermediateMappingsName.set("mojang")
                         } else if (projectTinyMappings == null) {
                             // We have source mappings, but target is unobfuscated
