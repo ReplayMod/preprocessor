@@ -1,5 +1,6 @@
 package com.replaymod.gradle.preprocess
 
+import net.fabricmc.mappingio.MappedElementKind
 import net.fabricmc.mappingio.format.tiny.Tiny2FileWriter
 import net.fabricmc.mappingio.tree.MemoryMappingTree
 import org.gradle.api.DefaultTask
@@ -25,21 +26,27 @@ internal abstract class GenerateIdentityMappingsFromMinecraftJars : DefaultTask(
     @TaskAction
     fun generate() {
         val mappingTree = MemoryMappingTree()
-        mappingTree.visitNamespaces("named", emptyList())
+        mappingTree.visitNamespaces("official", listOf("named", "mojang"))
 
         val classVisitor = object : ClassVisitor(Opcodes.ASM9) {
             override fun visit(version: Int, access: Int, name: String, signature: String?, superName: String?, interfaces: Array<out String>?) {
                 mappingTree.visitClass(name)
+                mappingTree.visitDstName(MappedElementKind.CLASS, 0, name)
+                mappingTree.visitDstName(MappedElementKind.CLASS, 1, name)
                 super.visit(version, access, name, signature, superName, interfaces)
             }
 
             override fun visitField(access: Int, name: String, descriptor: String, signature: String?, value: Any?): FieldVisitor? {
                 mappingTree.visitField(name, descriptor)
+                mappingTree.visitDstName(MappedElementKind.FIELD, 0, name)
+                mappingTree.visitDstName(MappedElementKind.FIELD, 1, name)
                 return super.visitField(access, name, descriptor, signature, value)
             }
 
             override fun visitMethod(access: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?): MethodVisitor? {
                 mappingTree.visitMethod(name, descriptor)
+                mappingTree.visitDstName(MappedElementKind.METHOD, 0, name)
+                mappingTree.visitDstName(MappedElementKind.METHOD, 1, name)
                 return super.visitMethod(access, name, descriptor, signature, exceptions)
             }
         }

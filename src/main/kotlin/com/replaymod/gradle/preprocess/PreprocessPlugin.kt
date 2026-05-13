@@ -189,7 +189,7 @@ class PreprocessPlugin : Plugin<Project> {
                             dependsOn(generatedMappingsTask)
                             sourceMappings = generatedMappingsTask.get().output.get().asFile
                             destinationMappings = generatedMappingsTask.get().output.get().asFile
-                            intermediateMappingsName.set("named")
+                            intermediateMappingsName.set("mojang")
                         } else if (projectTinyMappings == null) {
                             // We have source mappings, but target is unobfuscated
                             sourceMappings = inheritedTinyMappings
