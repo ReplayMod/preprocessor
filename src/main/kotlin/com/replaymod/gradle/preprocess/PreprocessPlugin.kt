@@ -179,17 +179,16 @@ class PreprocessPlugin : Plugin<Project> {
                     val inheritedSrgMappings = inherited.tinyMappingsWithSrg
                     val projectTinyMappings = project.tinyMappings
                     val inheritedTinyMappings = inherited.tinyMappings
-                    val generatedMappingsFile = project.layout.buildDirectory.get().asFile.resolve("generatedIdentityMappings.tiny")
                     val generatedMappingsTask = tasks.register("generateIdentityMappingsFromMinecraftJars", GenerateIdentityMappingsFromMinecraftJars::class) {
                         minecraftJars.from(project.extensions.getByType<LoomGradleExtensionAPI>().namedMinecraftJars)
-                        output.set(generatedMappingsFile)
+                        output.set(project.layout.buildDirectory.get().asFile.resolve("generatedIdentityMappings.tiny"))
                     }
                     tasks.withType<PreprocessTask>().configureEach {
                         if (projectTinyMappings == null && inheritedTinyMappings == null) {
                             // Between two unobfuscated versions
                             dependsOn(generatedMappingsTask)
-                            sourceMappings = generatedMappingsFile
-                            destinationMappings = generatedMappingsFile
+                            sourceMappings = generatedMappingsTask.get().output.get().asFile
+                            destinationMappings = generatedMappingsTask.get().output.get().asFile
                             intermediateMappingsName.set("named")
                         } else if (projectTinyMappings == null) {
                             // We have source mappings, but target is unobfuscated
