@@ -187,6 +187,16 @@ class PreprocessPlugin : Plugin<Project> {
                         minecraftJars.from(project.extensions.getByType<LoomGradleExtensionAPI>().namedMinecraftJars)
                         output.set(project.layout.buildDirectory.get().asFile.resolve("generatedDestinationIdentityMappings.tiny"))
                     }
+                    val mergeSourceMappingsTask = tasks.register("mergeSourceNamedAndMojangMappings", MergeNamedAndMojangMappingsTask::class) {
+                        namedMappings.set { inheritedTinyMappings!! }
+                        mojangMappings.set { inherited.mojangMappings!! }
+                        output.set(project.layout.buildDirectory.get().asFile.resolve("mergedSourceNamedAndMojangMappings.tiny"))
+                    }
+                    val mergeDestinationMappingsTask = tasks.register("mergeDestinationNamedAndMojangMappings", MergeNamedAndMojangMappingsTask::class) {
+                        namedMappings.set { projectTinyMappings!! }
+                        mojangMappings.set { project.mojangMappings!! }
+                        output.set(project.layout.buildDirectory.get().asFile.resolve("mergedDestinationNamedAndMojangMappings.tiny"))
+                    }
                     tasks.withType<PreprocessTask>().configureEach {
                         if (projectTinyMappings == null && inheritedTinyMappings == null) {
                             // Between two unobfuscated versions
@@ -196,14 +206,16 @@ class PreprocessPlugin : Plugin<Project> {
                             intermediateMappingsName.set("mojang")
                         } else if (projectTinyMappings == null) {
                             // We have source mappings, but target is unobfuscated
-                            sourceMappings = inheritedTinyMappings
-                            destinationMappings = inherited.mojangMappings
-                            intermediateMappingsName.set("official")
+                            dependsOn(mergeSourceMappingsTask, generateDestinationMappingsTask)
+                            sourceMappings = mergeSourceMappingsTask.get().output.get().asFile
+                            destinationMappings = generateDestinationMappingsTask.get().output.get().asFile
+                            intermediateMappingsName.set("mojang")
                         } else if (inheritedTinyMappings == null) {
                             // We have target mappings, but source is unobfuscated
-                            sourceMappings = project.mojangMappings
-                            destinationMappings = projectTinyMappings
-                            intermediateMappingsName.set("official")
+                            dependsOn(generateSourceMappingsTask, mergeDestinationMappingsTask)
+                            sourceMappings = generateSourceMappingsTask.get().output.get().asFile
+                            destinationMappings = mergeDestinationMappingsTask.get().output.get().asFile
+                            intermediateMappingsName.set("mojang")
                         } else if ((inheritedSrgMappings != null) == (projectSrgMappings != null)) {
                             sourceMappings = inheritedSrgMappings ?: inheritedTinyMappings
                             destinationMappings = projectSrgMappings ?: projectTinyMappings
