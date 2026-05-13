@@ -4,8 +4,6 @@ import com.replaymod.gradle.remap.Transformer
 import com.replaymod.gradle.remap.legacy.LegacyMapping
 import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
 import net.fabricmc.mappingio.MappedElementKind
-import net.fabricmc.mappingio.MappingReader
-import net.fabricmc.mappingio.MappingVisitor
 import net.fabricmc.mappingio.tree.MappingTree
 import net.fabricmc.mappingio.tree.MemoryMappingTree
 import org.cadixdev.lorenz.MappingSet
@@ -30,14 +28,11 @@ import org.gradle.workers.WorkerExecutor
 import java.io.File
 import java.io.Serializable
 import java.lang.ref.SoftReference
-import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.function.Consumer
 import java.util.regex.Pattern
 import javax.inject.Inject
-import kotlin.io.path.bufferedReader
-import kotlin.io.path.extension
 
 data class Keywords(
         val disableRemap: String,
@@ -492,18 +487,6 @@ private class PreprocessActionImpl : Consumer<PreprocessParameters> {
 
         if (commentPreprocessor.fail) {
             throw GradleException("Failed to remap sources. See errors above for details.")
-        }
-    }
-
-    private fun readMappings(path: Path, visitor: MappingVisitor) {
-        if (path.extension == "jar") {
-            FileSystems.newFileSystem(path).use { fileSystem ->
-                fileSystem.getPath("mappings", "mappings.tiny").bufferedReader().use { reader ->
-                    return MappingReader.read(reader, visitor)
-                }
-            }
-        } else {
-            return MappingReader.read(path, visitor)
         }
     }
 
