@@ -694,7 +694,21 @@ private class PreprocessActionImpl : Consumer<PreprocessParameters> {
                     tmpTree.getClass(dstName)!!
                 }
             } else {
-                dstTree.getClass(srcCls.getName(srcSharedNsId), dstSharedNsId) ?: continue
+                val sharedName = srcCls.getName(srcSharedNsId)
+                dstTree.getClass(sharedName, dstSharedNsId)
+                    // Usually the shared name is something human-unfriendly like `class_1234`, and therefore we'd
+                    // prefer keeping the human readable source name when we cannot find the destination name.
+                    // However, in the specific case of mapping between obfuscated and unobfuscated versions, the
+                    // shared name will actually be the unobfuscated name, and that'll usually be closer than the
+                    // original (often yarn) name. So in such a scenario, we'll just use the shared name as the
+                    // destination name if we can't find the real destination class (e.g. because it was renamed).
+                    ?: if (sharedNamespace == "mojang") {
+                        tmpTree.visitClass(sharedName)
+                        tmpTree.visitDstName(MappedElementKind.CLASS, dstNamedNsId, sharedName)
+                        tmpTree.getClass(sharedName)!!
+                    } else {
+                        continue
+                    }
             }
             mrgTree.visitClass(srcCls.getName(srcNamedNsId))
             mrgTree.visitDstName(MappedElementKind.CLASS, 0, dstCls.getName(dstNamedNsId))
