@@ -53,7 +53,7 @@ class PreprocessPlugin : Plugin<Project> {
         val ext = project.extensions.create("preprocess", PreprocessExtension::class, project.objects, mcVersion)
 
         val kotlin = project.plugins.hasPlugin("kotlin")
-        val remapKotlinCompilerClasspath = setupKotlinCompilerClasspath(project)
+        val remapClasspathConfiguration = setupRemapClasspath(project)
 
         project.the<SourceSetContainer>().configureEach {
             val compileClasspath = if (name == "main") "compileClasspath" else name + "CompileClasspath"
@@ -155,7 +155,7 @@ class PreprocessPlugin : Plugin<Project> {
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
                     manageImports.convention(ext.manageImports)
-                    compiler.from(remapKotlinCompilerClasspath)
+                    remapClasspath.from(remapClasspathConfiguration)
                 }
                 val sourceJavaTask = project.tasks.findByName("source${name.uppercaseFirstChar()}Java")
                 (sourceJavaTask ?: project.tasks["compile${cName}Java"]).dependsOn(preprocessCode)
@@ -337,30 +337,15 @@ class PreprocessPlugin : Plugin<Project> {
         }
     }
 
-    private fun setupKotlinCompilerClasspath(project: Project): Configuration {
-        val remapKotlinCompiler by project.configurations.creating
-        val remapKotlinCompilerClasspath by project.configurations.creating {
-            extendsFrom(remapKotlinCompiler)
+    private fun setupRemapClasspath(project: Project): NamedDomainObjectProvider<ResolvableConfiguration> {
+        val remapDependencyScope = project.configurations.dependencyScope("preprocess-remap")
+        project.dependencies {
+            // Note: Version needs to be kept in-sync with the one in `build.gradle.kts`
+            remapDependencyScope("com.github.replaymod:remap:b9800c7c2403c3d1e9887d4df1c159e2b98b7322")
         }
-
-        var appliedKotlinGradlePluginVersion: String? = null
-        project.pluginManager.withPlugin("kotlin") {
-            try {
-                // Hack to find the version of the applied Kotlin Gradle Plugin so we can by default use the same
-                // version with remap
-                appliedKotlinGradlePluginVersion = project.plugins.getPlugin("kotlin")
-                    .javaClass.protectionDomain.codeSource.location.toURI().toPath()
-                    .parent.parent.name
-            } catch (e: Exception) {
-                project.logger.error("Failed to determine version of applied Kotlin plugin, falling back to $KOTLIN_COMPILER_VERSION.")
-            }
+        return project.configurations.resolvable("preprocess-remap-resolver") {
+            extendsFrom(remapDependencyScope.get())
         }
-        project.afterEvaluate {
-            val version = appliedKotlinGradlePluginVersion ?: KOTLIN_COMPILER_VERSION
-            project.dependencies.add(remapKotlinCompiler.name, "$KOTLIN_COMPILER_EMBEDDABLE:$version")
-        }
-
-        return remapKotlinCompilerClasspath
     }
 }
 
@@ -426,6 +411,3 @@ private fun Provider<Directory>.dir(path: String): Provider<Directory> =
 private fun String.uppercaseFirstChar() = replaceFirstChar { it.uppercaseChar() }
 
 private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)
-
-private const val KOTLIN_COMPILER_EMBEDDABLE = "org.jetbrains.kotlin:kotlin-compiler-embeddable"
-private const val KOTLIN_COMPILER_VERSION = "2.2.0"

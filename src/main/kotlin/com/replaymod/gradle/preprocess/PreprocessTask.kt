@@ -162,7 +162,7 @@ open class PreprocessTask @Inject constructor(
     val manageImports = objects.property<Boolean>()
 
     @Classpath
-    val compiler = objects.fileCollection()
+    val remapClasspath = objects.fileCollection()
 
     fun entry(source: FileCollection, generated: File, overwrites: File) {
         entries.add(InOut(source, generated, overwrites))
@@ -174,13 +174,13 @@ open class PreprocessTask @Inject constructor(
     }
 
     fun preprocess(mappingIn: File?, entriesIn: List<InOut>) {
-        val workQueue = if (compiler.isEmpty) {
+        val workQueue = if (remapClasspath.isEmpty) {
             workerExecutor.noIsolation()
         } else {
             // See comment on `executeIsolated` below
             workerExecutor.noIsolation()
             //workerExecutor.classLoaderIsolation {
-            //    classpath.from(compiler)
+            //    classpath.from(remapClasspath)
             //}
         }
 
@@ -190,7 +190,7 @@ open class PreprocessTask @Inject constructor(
         }
 
         workQueue.submit(PreprocessAction::class) {
-            compiler.set(this@PreprocessTask.compiler)
+            remapClasspath.set(this@PreprocessTask.remapClasspath)
             entries.set(entriesIn.map { entry ->
                 objects.newInstance(PreprocessParameters.InOut::class).apply {
                     source.set(entry.source)
@@ -218,7 +218,7 @@ open class PreprocessTask @Inject constructor(
 }
 
 internal interface PreprocessParameters : WorkParameters {
-    val compiler: Property<FileCollection>
+    val remapClasspath: Property<FileCollection>
 
     interface InOut {
         val source: Property<FileCollection>
@@ -245,11 +245,11 @@ private val LOGGER = Logging.getLogger(PreprocessTask::class.java)
 
 internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
     override fun execute() {
-        val compiler = parameters.compiler.get()
-        if (compiler.isEmpty) {
+        val remapClasspath = parameters.remapClasspath.get()
+        if (remapClasspath.isEmpty) {
             PreprocessActionImpl().accept(parameters)
         } else {
-            executeIsolated(compiler)
+            executeIsolated(remapClasspath)
         }
     }
 
@@ -262,7 +262,6 @@ internal abstract class PreprocessAction : WorkAction<PreprocessParameters> {
         val fullClasspath =
             compilerClasspath.files.map { it.toURI().toURL() } + listOf(
                 PreprocessActionImpl::class.java,
-                Transformer::class.java,
             ).map { it.protectionDomain.codeSource.location }
 
         LOGGER.debug("Remap IsolatedClassLoader classpath:")
@@ -357,8 +356,7 @@ private class PreprocessActionImpl : Consumer<PreprocessParameters> {
                 visitNamespaces("source", listOf("destination"))
                 visitEnd()
             }
-            val mrgTree = mergeMappings(srcTree, dstTree, extTree, sharedMappingsNamespace)
-            TinyReader(mrgTree, "source", "destination").read()
+            mergeMappings(srcTree, dstTree, extTree, sharedMappingsNamespace)
         } else {
             null
         }
