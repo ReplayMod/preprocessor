@@ -23,7 +23,7 @@ plugins {
 group = "com.github.replaymod"
 version = "SNAPSHOT"
 
-val kotestVersion: String by project.extra
+val kotestVersion = project.extra["kotestVersion"] as String
 
 gradlePlugin {
     plugins {
