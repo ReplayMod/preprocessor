@@ -8,7 +8,8 @@ import javax.inject.Inject
 open class RootPreprocessExtension @Inject constructor(
     objects: ObjectFactory,
 ) : ProjectGraphNodeDSL {
-    val strictExtraMappings = objects.property<Boolean>() // defaults to `false` for backwards compatibility
+    @Deprecated("Always enabled. Legacy non-strict mappings are no longer supported.")
+    val strictExtraMappings = objects.property<Boolean>() // defaults to `true`, `false` is no longer supported
 
     var rootNode: ProjectGraphNode? = null
         get() = field ?: linkNodes()?.also { field = it }

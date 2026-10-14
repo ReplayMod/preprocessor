@@ -1,12 +1,9 @@
 package com.replaymod.gradle.preprocess
 
 import com.replaymod.gradle.remap.Transformer
-import com.replaymod.gradle.remap.legacy.LegacyMapping
-import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
 import net.fabricmc.mappingio.MappedElementKind
 import net.fabricmc.mappingio.tree.MappingTree
 import net.fabricmc.mappingio.tree.MemoryMappingTree
-import org.cadixdev.lorenz.MappingSet
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileTree
@@ -118,8 +115,9 @@ open class PreprocessTask @Inject constructor(
     @Optional // required if source or destination mappings have more than two namespaces (optional for backwards compat)
     val intermediateMappingsName = objects.property<String>()
 
+    @Deprecated("Always enabled. Legacy non-strict mappings are no longer supported.")
     @Input
-    val strictExtraMappings = objects.property<Boolean>().convention(false)
+    val strictExtraMappings = objects.property<Boolean>().convention(true)
 
     @InputFile
     @Optional
@@ -186,6 +184,11 @@ open class PreprocessTask @Inject constructor(
             //}
         }
 
+        @Suppress("DEPRECATION")
+        if (!strictExtraMappings.get()) {
+            throw UnsupportedOperationException("Non-strict extra mappings are no longer supported.")
+        }
+
         workQueue.submit(PreprocessAction::class) {
             compiler.set(this@PreprocessTask.compiler)
             entries.set(entriesIn.map { entry ->
@@ -198,7 +201,6 @@ open class PreprocessTask @Inject constructor(
             sourceMappings.set(this@PreprocessTask.sourceMappings)
             destinationMappings.set(this@PreprocessTask.destinationMappings)
             intermediateMappingsName.set(this@PreprocessTask.intermediateMappingsName)
-            strictExtraMappings.set(this@PreprocessTask.strictExtraMappings)
             mapping.set(mappingIn)
             reverseMapping.set(this@PreprocessTask.reverseMapping)
             jdkHome.set(this@PreprocessTask.jdkHome)
@@ -227,7 +229,6 @@ internal interface PreprocessParameters : WorkParameters {
     val sourceMappings: Property<File> // optional
     val destinationMappings: Property<File> // optional
     val intermediateMappingsName: Property<String> // optional depending on other properties
-    val strictExtraMappings: Property<Boolean>
     val mapping: Property<File> // optional
     val reverseMapping: Property<Boolean>
     val jdkHome: DirectoryProperty // optional
@@ -304,7 +305,6 @@ private class PreprocessActionImpl : Consumer<PreprocessParameters> {
         val sourceMappings = params.sourceMappings.orNull
         val destinationMappings = params.destinationMappings.orNull
         val intermediateMappingsName = params.intermediateMappingsName
-        val strictExtraMappings = params.strictExtraMappings
         val mapping = params.mapping.orNull
         val reverseMapping = params.reverseMapping.get()
         val jdkHome = params.jdkHome
@@ -337,68 +337,28 @@ private class PreprocessActionImpl : Consumer<PreprocessParameters> {
             val sharedMappingsNamespace = intermediateMappingsName.get()
             val srcTree = MemoryMappingTree().also { readMappings(sourceMappingsFile.toPath(), it) }
             val dstTree = MemoryMappingTree().also { readMappings(destinationMappingsFile.toPath(), it) }
-            if (strictExtraMappings.get()) {
-                if (sharedMappingsNamespace == "srg") {
-                    inferSharedClassMappings(srcTree, dstTree, sharedMappingsNamespace)
-                }
-                srcTree.setIndexByDstNames(true)
-                dstTree.setIndexByDstNames(true)
-                val extTree = mapping?.let { file ->
-                    try {
-                        val ast = ExtraMapping.read(file.toPath())
-                        if (!reverseMapping) {
-                            ast.resolve(logger, srcTree, dstTree, "named", sharedMappingsNamespace).first
-                        } else {
-                            ast.resolve(logger, dstTree, srcTree, "named", sharedMappingsNamespace).second
-                        }
-                    } catch (e: Exception) {
-                        throw GradleException("Failed to parse $file: ${e.message}", e)
+            if (sharedMappingsNamespace == "srg") {
+                inferSharedClassMappings(srcTree, dstTree, sharedMappingsNamespace)
+            }
+            srcTree.setIndexByDstNames(true)
+            dstTree.setIndexByDstNames(true)
+            val extTree = mapping?.let { file ->
+                try {
+                    val ast = ExtraMapping.read(file.toPath())
+                    if (!reverseMapping) {
+                        ast.resolve(logger, srcTree, dstTree, "named", sharedMappingsNamespace).first
+                    } else {
+                        ast.resolve(logger, dstTree, srcTree, "named", sharedMappingsNamespace).second
                     }
-                } ?: MemoryMappingTree().apply {
-                    visitNamespaces("source", listOf("destination"))
-                    visitEnd()
+                } catch (e: Exception) {
+                    throw GradleException("Failed to parse $file: ${e.message}", e)
                 }
-                val mrgTree = mergeMappings(srcTree, dstTree, extTree, sharedMappingsNamespace)
-                TinyReader(mrgTree, "source", "destination").read()
-            } else {
-                val sourceMappings = TinyReader(srcTree, "named", sharedMappingsNamespace).read()
-                val destinationMappings = TinyReader(dstTree, "named", sharedMappingsNamespace).read()
-                if (mapping != null) {
-                    val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
-                    val clsMap = legacyMap.splitOffClassMappings()
-                    val srcMap = sourceMappings
-                    val dstMap = destinationMappings
-                    legacyMap.mergeBoth(
-                        // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
-                        // dstMap and would otherwise be filtered by the join)
-                        srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
-                        MappingSet.create(LegacyMappingSetModelFactory()))
-                } else {
-                    val srcMap = sourceMappings!!
-                    val dstMap = destinationMappings!!
-                    srcMap.join(dstMap.reverse())
-                }
+            } ?: MemoryMappingTree().apply {
+                visitNamespaces("source", listOf("destination"))
+                visitEnd()
             }
-        } else if (!intermediateMappingsName.isPresent && classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
-            if (mapping != null) {
-                if (sourceMappings != null && destinationMappings != null) {
-                    val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
-                    val clsMap = legacyMap.splitOffClassMappings()
-                    val srcMap = sourceMappings!!.readMappings()
-                    val dstMap = destinationMappings!!.readMappings()
-                    legacyMap.mergeBoth(
-                            // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
-                            // dstMap and would otherwise be filtered by the join)
-                            srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
-                            MappingSet.create(LegacyMappingSetModelFactory()))
-                } else {
-                    LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
-                }
-            } else {
-                val srcMap = sourceMappings!!.readMappings()
-                val dstMap = destinationMappings!!.readMappings()
-                srcMap.join(dstMap.reverse())
-            }
+            val mrgTree = mergeMappings(srcTree, dstTree, extTree, sharedMappingsNamespace)
+            TinyReader(mrgTree, "source", "destination").read()
         } else {
             null
         }

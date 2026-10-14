@@ -256,14 +256,11 @@ class PreprocessPlugin : Plugin<Project> {
                         } else {
                             throw IllegalStateException("Failed to find mappings from $inherited to $project.")
                         }
-                        strictExtraMappings.convention(rootExtension.strictExtraMappings.orElse(false))
                     }
 
-                    if (!rootExtension.strictExtraMappings.isPresent) {
-                        logger.warn("Legacy extra mappings are deprecated. " +
-                            "Please consider enabling strict extra mappings via " +
-                            "`preprocess.strictExtraMappings.set(true)` in your root project. " +
-                            "You may suppress this message by explicitly setting it to `false`.")
+                    @Suppress("DEPRECATION")
+                    if (rootExtension.strictExtraMappings.isPresent && !rootExtension.strictExtraMappings.get()) {
+                        throw UnsupportedOperationException("Non-strict extra mappings are no longer supported.")
                     }
                 }
             }
