@@ -79,9 +79,7 @@ data class ExtraMapping(val entries: List<Entry>) {
                 is FieldEntry -> entry.copy(srcClsName = entry.srcClsName.toInternal(), dstClsName = entry.dstClsName?.toInternal())
                 is MethodEntry -> entry.copy(srcClsName = entry.srcClsName.toInternal(), dstClsName = entry.dstClsName?.toInternal())
             }
-        }
-
-        val extraClsMappings = internalEntries.filterIsInstance<ClassEntry>().associate { it.srcName to it.dstName }
+        }.toMutableList()
 
         val clsTree = MemoryMappingTree(true).apply { visitNamespaces("source", listOf("destination")) }
         val clsSrcNsId = clsTree.getNamespaceId("source")
@@ -92,11 +90,35 @@ data class ExtraMapping(val entries: List<Entry>) {
             clsTree.visitClass(srcName)
             clsTree.visitDstName(MappedElementKind.CLASS, clsDstNsId, dstName)
         }
-        for ((srcName, dstName) in extraClsMappings) {
-            clsTree.visitClass(srcName)
-            clsTree.visitDstName(MappedElementKind.CLASS, clsDstNsId, dstName)
+        var i = 0
+        while (i < internalEntries.size) {
+            val entry = internalEntries[i]
+            if (entry !is ClassEntry) {
+                i++
+                continue
+            }
+            clsTree.visitClass(entry.srcName)
+            clsTree.visitDstName(MappedElementKind.CLASS, clsDstNsId, entry.dstName)
+
+            val nestedNamePrefix = entry.srcName + "$"
+            val nestedClasses = clsTree.classes.filter { it.srcName!!.startsWith(nestedNamePrefix) }
+            for (nestedClass in nestedClasses) {
+                val srcName = nestedClass.srcName!!
+                val relativeName = srcName.substring(nestedNamePrefix.length)
+                val dstName = entry.dstName + "$" + relativeName
+
+                clsTree.visitClass(srcName)
+                clsTree.visitDstName(MappedElementKind.CLASS, clsDstNsId, dstName)
+
+                internalEntries.add(i + 1, ClassEntry(-1, srcName, dstName))
+                i++
+            }
+
+            i++
         }
         clsTree.visitEnd()
+
+        val extraClsMappings = internalEntries.filterIsInstance<ClassEntry>().associate { it.srcName to it.dstName }
 
         val completedEntries = internalEntries.flatMap { entry ->
             fun findDstCls(entry: Entry, srcName: String): String? {
