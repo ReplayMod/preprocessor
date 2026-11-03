@@ -55,7 +55,7 @@ dependencies {
     implementation(gradleApi())
     implementation(localGroovy())
     // Note: Version needs to be kept in-sync with the one in `PreprocessPlugin.setupRemapClasspath`
-    compileOnly("com.github.replaymod:remap:b9800c7c2403c3d1e9887d4df1c159e2b98b7322")
+    compileOnly("com.github.replaymod:remap:5755a0125325d9630aded76e539ad6d303742392")
     implementation("net.fabricmc:mapping-io:0.6.1")
     implementation("org.ow2.asm:asm:9.9.1")
 
