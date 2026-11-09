@@ -22,17 +22,17 @@ open class RootPreprocessExtension @Inject constructor(
 
     private fun linkNodes(): ProjectGraphNode? {
         val first = nodes.firstOrNull() ?: return null
-        val visited = mutableSetOf<Node>()
-        fun Node.breadthFirstSearch(): ProjectGraphNode {
+        val visited = mutableSetOf(first)
+        fun Node.depthFirstSearch(): ProjectGraphNode {
             val graphNode = ProjectGraphNode(project, mcVersion, mappings)
             links.forEach { (otherNode, extraMappings) ->
                 if (visited.add(otherNode)) {
-                    graphNode.links.add(Pair(otherNode.breadthFirstSearch(), extraMappings))
+                    graphNode.links.add(Pair(otherNode.depthFirstSearch(), extraMappings))
                 }
             }
             return graphNode
         }
-        return first.breadthFirstSearch()
+        return first.depthFirstSearch()
     }
 
     override fun addNode(project: String, mcVersion: Int, mappings: String?, extraMappings: File?, invertMappings: Boolean): ProjectGraphNode {
